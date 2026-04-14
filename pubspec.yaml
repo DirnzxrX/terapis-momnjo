@@ -1,0 +1,49 @@
+name: therapist_momnjo
+description: "Aplikasi Momnjo untuk Terapis"
+publish_to: 'none'
+version: 1.0.0+1
+
+environment:
+  sdk: '>=3.0.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  # UI & Styling
+  cupertino_icons: ^1.0.6
+  cached_network_image: ^3.3.1 
+  
+  # State Management & API
+  provider: ^6.1.1 
+  dio: ^5.4.0 
+  shared_preferences: ^2.2.2 
+
+  # Maps & Location (Screen 5 & 7)
+  google_maps_flutter: ^2.5.3
+  geolocator: ^10.1.0 
+  
+  # Kamera & Upload Foto (Screen 7 & 8)
+  image_picker: ^1.0.7
+  
+  # Tanda Tangan Digital (Screen 8)
+  signature: ^5.4.0 
+
+  # Format Uang (Rp) & Tanggal (Screen 4, 9)
+  intl: ^0.18.1
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+
+flutter:
+  uses-material-design: true
+  
+  # Daftar semua folder & file aset
+  assets:
+    - assets/background.png
+    - assets/daun1.png
+    - assets/daun2.png
+    - assets/logo_momnjo.png
+    - assets/titik.png
