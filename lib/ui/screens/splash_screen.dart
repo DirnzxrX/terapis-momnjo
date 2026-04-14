@@ -13,14 +13,8 @@ class _SplashScreenState extends State<SplashScreen> {
     super.initState();
     // Logika buat pindah halaman otomatis setelah 3 detik
     Future.delayed(const Duration(seconds: 3), () {
-      // Uncomment kode di bawah ini kalo file Login-nya udah lu bikin ya Tuan!
-      /*
-      Navigator.pushReplacement(
-        context,
-        MaterialPageRoute(builder: (context) => const LoginScreen()),
-      );
-      */
-      debugPrint("Pindah ke halaman Login...");
+      // Pindah ke halaman login pake Named Routes yang udah di-setup di main.dart
+      Navigator.pushReplacementNamed(context, '/login');
     });
   }
 

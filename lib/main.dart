@@ -1,12 +1,12 @@
 import 'package:flutter/material.dart';
 
-// TODO: Nanti di-uncomment kalo file-filenya udah lu bikin ya Tuan
-// import 'core/theme.dart';
-// import 'ui/navigation/main_nav.dart';
-import 'ui/screens/splash_screen.dart';
+// Import semua screen yang mau didaftarin rutenya di sini
+import 'package:therapist_momnjo/ui/screens/splash_screen.dart';
+import 'package:therapist_momnjo/ui/screens/auth/login_screen.dart';
+import 'package:therapist_momnjo/ui/screens/auth/register_screen.dart';
+// import 'package:therapist_momnjo/ui/navigation/main_nav.dart'; // Nanti kalo udah ada, uncomment
 
 void main() {
-  // Kalau nanti lu pake Firebase atau Provider, inisialisasinya di sini sebelum runApp
   WidgetsFlutterBinding.ensureInitialized();
   runApp(const MomnjoTherapistApp());
 }
@@ -18,23 +18,19 @@ class MomnjoTherapistApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MaterialApp(
       title: 'Momnjo Terapis',
-      debugShowCheckedModeBanner: false, // Biar pita debug di pojok kanan atas ilang
+      debugShowCheckedModeBanner: false, 
       
-      // Setup tema global di sini biar gampang
       theme: ThemeData(
-        // Pake warna pink khas Momnjo
         primaryColor: const Color(0xFFF48FB1), 
         colorScheme: ColorScheme.fromSwatch().copyWith(
           primary: const Color(0xFFF48FB1),
-          secondary: const Color(0xFFFFEBEE), // Peach color
+          secondary: const Color(0xFFFFEBEE), 
         ),
-        // Biasanya desain kayak gini pake font Poppins atau Montserrat
         fontFamily: 'Poppins', 
         
-        // Setup Appbar default biar putih, rapi, elegan
         appBarTheme: const AppBarTheme(
           backgroundColor: Colors.white,
-          elevation: 0, // Bikin flat nggak ada bayangan
+          elevation: 0, 
           iconTheme: IconThemeData(color: Colors.black87),
           titleTextStyle: TextStyle(
             color: Colors.black87, 
@@ -43,11 +39,23 @@ class MomnjoTherapistApp extends StatelessWidget {
           ),
           centerTitle: true,
         ),
-        scaffoldBackgroundColor: const Color(0xFFFAFAFA), // Background app sedikit abu-abu muda biar adem
+        scaffoldBackgroundColor: const Color(0xFFFAFAFA), 
       ),
 
-      // Udah diganti jadi SplashScreen ya Tuan!
-      home: const SplashScreen(), 
+      // --- INI DIA MAGIC-NYA: NAMED ROUTES ---
+      // initialRoute itu ibarat titik start pertama kali app dibuka
+      initialRoute: '/', 
+      
+      // Di sini lu daftarin semua "jalan" di aplikasi lu
+      routes: {
+        '/': (context) => const SplashScreen(), // Rute '/' default ke Splash
+        '/login': (context) => const LoginScreen(), // Rute '/login' arahin ke LoginScreen
+        '/register': (context) => const RegisterScreen(), // Rute '/register' arahin ke RegisterScreen
+        
+        // Nanti kalo halaman lain udah jadi, tinggal lu tambahin di mari:
+        // '/main': (context) => const MainNavigation(),
+        // '/active_job': (context) => const ActiveJobScreen(),
+      },
     );
   }
 }

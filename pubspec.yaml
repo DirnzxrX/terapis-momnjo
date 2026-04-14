@@ -40,10 +40,6 @@ dev_dependencies:
 flutter:
   uses-material-design: true
   
-  # Daftar semua folder & file aset
+  # Cukup daftarin foldernya aja, otomatis semua file di dalamnya kebaca
   assets:
-    - assets/background.png
-    - assets/daun1.png
-    - assets/daun2.png
-    - assets/logo_momnjo.png
-    - assets/titik.png
+    - assets/
