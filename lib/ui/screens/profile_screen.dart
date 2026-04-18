@@ -1,53 +1,99 @@
 import 'package:flutter/material.dart';
+// WAJIB DITAMBAHKAN: Import ApiService untuk menghapus sesi dari backend/lokal
+import 'package:therapist_momnjo/data/api_service.dart';
+import 'settings_screen.dart'; // Pastikan file ini ada di folder yang sama atau sesuaikan path-nya
 
 class ProfileScreen extends StatelessWidget {
   const ProfileScreen({Key? key}) : super(key: key);
 
   final Color primaryPink = const Color(0xFFE8647C); // Pink sesuai tema mockup baru
-  final Color bgLight = const Color(0xFFFFF7F7); // Background krem/pink muda
+
+  // --- LOGIKA LOGOUT DITAMBAHKAN DI SINI ---
+  void _handleLogout(BuildContext context) {
+    showDialog(
+      context: context,
+      barrierDismissible: false, 
+      builder: (BuildContext dialogContext) {
+        return AlertDialog(
+          title: const Text('Konfirmasi Keluar', style: TextStyle(fontWeight: FontWeight.bold)),
+          content: const Text('Apakah Anda yakin ingin mengakhiri sesi dan keluar dari aplikasi?'),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext), 
+              child: Text('Batal', style: TextStyle(color: Colors.grey.shade600, fontWeight: FontWeight.bold)),
+            ),
+            ElevatedButton(
+              onPressed: () async {
+                // 1. Tutup dialog
+                Navigator.pop(dialogContext);
+                
+                // 2. Hapus sesi via ApiService
+                await ApiService().logout();
+
+                // 3. Hancurkan semua tumpukan layar dan lempar ke Login
+                if (context.mounted) {
+                  Navigator.pushNamedAndRemoveUntil(
+                    context, 
+                    '/login', // Pastikan rute ini terdaftar di main.dart
+                    (Route<dynamic> route) => false, 
+                  );
+                }
+              },
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.red.shade600,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+              ),
+              child: const Text('Ya, Keluar', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+            ),
+          ],
+        );
+      },
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: bgLight, // Background disamakan dengan tema mockup
-      appBar: AppBar(
-        backgroundColor: bgLight,
-        elevation: 0,
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back, color: Colors.black87),
-          onPressed: () {
-            // Cek apakah ada rute sebelumnya, biar ga error kalau dijadikan footer
-            if (Navigator.canPop(context)) {
-              Navigator.pop(context);
-            }
-          },
+    return Container(
+      decoration: const BoxDecoration(
+        image: DecorationImage(
+          image: AssetImage('assets/background.png'),
+          fit: BoxFit.cover,
         ),
-        title: const Text(
-          'Profil Saya',
-          style: TextStyle(
-            color: Colors.black87,
-            fontSize: 18,
-            fontWeight: FontWeight.bold,
-          ),
-        ),
-        centerTitle: true,
       ),
-      body: SingleChildScrollView(
-        child: Column(
-          children: [
-            const SizedBox(height: 10),
-            // 1. Header Profil (Dibungkus dalam Card Putih)
-            _buildProfileHeader(),
-            const SizedBox(height: 16),
+      child: Scaffold(
+        backgroundColor: Colors.transparent, 
+        appBar: AppBar(
+          backgroundColor: Colors.transparent, 
+          elevation: 0,
+          automaticallyImplyLeading: false, 
+          title: const Text(
+            'Profil Saya',
+            style: TextStyle(
+              color: Colors.black87,
+              fontSize: 18,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+          centerTitle: true,
+        ),
+        body: SingleChildScrollView(
+          child: Column(
+            children: [
+              const SizedBox(height: 10),
+              // 1. Header Profil
+              _buildProfileHeader(),
+              const SizedBox(height: 16),
 
-            // 2. Info Detail (Area, Pengalaman, Spesialisasi)
-            _buildDetailInfo(),
-            const SizedBox(height: 16),
+              // 2. Info Detail
+              _buildDetailInfo(),
+              const SizedBox(height: 16),
 
-            // 3. Menu List (Dibungkus dalam Card Putih)
-            _buildMenuList(),
-            const SizedBox(height: 40), // Spasi bawah biar ga mentok
-          ],
+              // 3. Menu List 
+              _buildMenuList(context),
+              const SizedBox(height: 40), 
+            ],
+          ),
         ),
       ),
     );
@@ -72,22 +118,18 @@ class ProfileScreen extends StatelessWidget {
       ),
       child: Row(
         children: [
-          // Avatar
           Container(
             padding: const EdgeInsets.all(3),
             decoration: BoxDecoration(
               shape: BoxShape.circle,
               color: Colors.pink.shade50,
             ),
-            // Hapus 'const' di sini karena NetworkImage bukan nilai konstan (const)
             child: const CircleAvatar(
               radius: 36,
-              // Bisa diganti pakai AssetImage jika fotonya ada di folder assets
               backgroundImage: NetworkImage('https://i.pravatar.cc/150?img=5'), 
             ),
           ),
           const SizedBox(width: 16),
-          // Info Terapis
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -193,10 +235,10 @@ class ProfileScreen extends StatelessWidget {
           ),
         ),
       ],
-    ); // Mengubah tanda koma (,) menjadi titik koma (;) di sini
+    );
   }
 
-  Widget _buildMenuList() {
+  Widget _buildMenuList(BuildContext context) {
     return Container(
       margin: const EdgeInsets.symmetric(horizontal: 20),
       decoration: BoxDecoration(
@@ -212,41 +254,61 @@ class ProfileScreen extends StatelessWidget {
       ),
       child: Column(
         children: [
-          const SizedBox(height: 8), // Padding atas dalam kotak
-          _buildMenuItem(Icons.person_outline, 'Data Diri'),
+          const SizedBox(height: 8), 
+          
+          _buildMenuItem(Icons.person_outline, 'Data Diri', () {}),
           _buildMenuDivider(),
-          _buildMenuItem(Icons.description_outlined, 'Dokumen'),
+          _buildMenuItem(Icons.description_outlined, 'Dokumen', () {}),
           _buildMenuDivider(),
-          _buildMenuItem(Icons.menu_book_outlined, 'SOP & Panduan'),
+          _buildMenuItem(Icons.menu_book_outlined, 'SOP & Panduan', () {}),
           _buildMenuDivider(),
-          _buildMenuItem(Icons.settings_outlined, 'Pengaturan'),
+          
+          _buildMenuItem(Icons.settings_outlined, 'Pengaturan', () {
+            Navigator.push(
+              context,
+              MaterialPageRoute(builder: (context) => const SettingsScreen()),
+            );
+          }),
+          
           _buildMenuDivider(),
-          _buildMenuItem(Icons.help_outline, 'Bantuan & Dukungan'),
+          _buildMenuItem(Icons.help_outline, 'Bantuan & Dukungan', () {}),
           _buildMenuDivider(),
-          _buildMenuItem(Icons.info_outline, 'Tentang Aplikasi'),
-          const SizedBox(height: 8), // Padding bawah dalam kotak
+          _buildMenuItem(Icons.info_outline, 'Tentang Aplikasi', () {}),
+          _buildMenuDivider(),
+          
+          // TOMBOL KELUAR DITAMBAHKAN DI SINI
+          _buildMenuItem(
+            Icons.logout_outlined, 
+            'Keluar', 
+            () => _handleLogout(context),
+            textColor: Colors.red.shade700, // Warna merah peringatan
+            iconColor: Colors.red.shade700,
+            showTrailing: false, // Hilangkan panah kanan
+          ),
+          
+          const SizedBox(height: 8), 
         ],
       ),
     );
   }
 
-  Widget _buildMenuItem(IconData icon, String title) {
+  // --- WIDGET BUILDERS ---
+  // PERBAIKAN: Parameter opsional ditambahkan agar warna teks dan ikon bisa diubah
+  Widget _buildMenuItem(IconData icon, String title, VoidCallback onTap, {Color? textColor, Color? iconColor, bool showTrailing = true}) {
     return ListTile(
       contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 0),
-      dense: true, // Biar jaraknya ga terlalu renggang, lebih compact
-      leading: Icon(icon, color: Colors.grey.shade700, size: 22),
+      dense: true, 
+      leading: Icon(icon, color: iconColor ?? Colors.grey.shade700, size: 22),
       title: Text(
         title,
-        style: const TextStyle(
+        style: TextStyle( // Hapus kata 'const' di sini karena menggunakan variabel warna
           fontSize: 14,
           fontWeight: FontWeight.w600,
-          color: Colors.black87,
+          color: textColor ?? Colors.black87,
         ),
       ),
-      trailing: Icon(Icons.chevron_right, color: Colors.grey.shade400, size: 20),
-      onTap: () {
-        // Logika navigasi ke masing-masing halaman menu
-      },
+      trailing: showTrailing ? Icon(Icons.chevron_right, color: Colors.grey.shade400, size: 20) : null,
+      onTap: onTap, 
     );
   }
 

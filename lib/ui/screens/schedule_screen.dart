@@ -8,157 +8,208 @@ class ScheduleScreen extends StatefulWidget {
 }
 
 class _ScheduleScreenState extends State<ScheduleScreen> {
-  // State untuk Tab dan Filter
   String _selectedTab = 'Hari Ini';
-  String _selectedFilter = 'Semua';
+  String _selectedFilter = 'Semua'; 
 
-  final Color primaryPink = const Color(0xFFF48FB1);
+  final Color primaryPink = const Color(0xFFE8647C); 
+  final TextEditingController _searchController = TextEditingController();
 
-  // Data dummy untuk list jadwal sesuai mockup
-  final List<Map<String, dynamic>> _schedules = [
+  // --- DATA DUMMY HARDCODED ---
+  final List<Map<String, dynamic>> _dummySchedules = [
     {
-      'time': '08.00',
-      'name': 'Siti Aisyah',
-      'service': 'Baby Spa',
-      'address': 'Jl. Mawar No. 5, Bandung',
+      'jam': '08.00',
+      'customer_fullname': 'Siti Aisyah',
+      'deskripsi': 'Baby Spa',
+      'alamat': 'Jl. Mawar No. 5, Bandung',
       'status': 'New',
+      'service_type': 'home_service',
     },
     {
-      'time': '10.00',
-      'name': 'Dewi Lestari',
-      'service': 'Mother Care Massage',
-      'address': 'Jl. Melati No. 10, Bandung',
+      'jam': '10.00',
+      'customer_fullname': 'Dewi Lestari',
+      'deskripsi': 'Mother Care Massage',
+      'alamat': 'MomNJO Clinic Bandung',
       'status': 'Accepted',
+      'service_type': 'on_site',
     },
     {
-      'time': '13.00',
-      'name': 'Anita Putri',
-      'service': 'Totok Payudara',
-      'address': 'Perumahan Citra 2 Blok A8',
+      'jam': '13.00',
+      'customer_fullname': 'Anita Putri',
+      'deskripsi': 'Totok Payudara',
+      'alamat': 'Perumahan Citra 2 Blok A8, Bandung',
       'status': 'OTW',
+      'service_type': 'home_service',
     },
     {
-      'time': '15.30',
-      'name': 'Rizky Amelia',
-      'service': 'Lulur Hamil',
-      'address': 'Jl. Anggrek No. 12, Bandung',
+      'jam': '15.30',
+      'customer_fullname': 'Rizky Amelia',
+      'deskripsi': 'Lulur Hamil',
+      'alamat': 'MomNJO Clinic Bandung',
       'status': 'Completed',
+      'service_type': 'on_site',
     },
   ];
 
+  List<Map<String, dynamic>> _filteredSchedules = [];
+
+  @override
+  void initState() {
+    super.initState();
+    _filteredSchedules = List.from(_dummySchedules);
+  }
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
+  }
+
+  void _applyFilters() {
+    setState(() {
+      _filteredSchedules = _dummySchedules.where((schedule) {
+        final status = schedule['status'] ?? '';
+        bool passStatus = (_selectedFilter == 'Semua') || 
+                          (status.toString().toLowerCase() == _selectedFilter.toLowerCase());
+
+        final query = _searchController.text.toLowerCase();
+        final name = (schedule['customer_fullname'] ?? '').toString().toLowerCase();
+        bool passSearch = query.isEmpty || name.contains(query);
+
+        return passStatus && passSearch;
+      }).toList();
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: const Color(0xFFFAFAFA),
-      appBar: AppBar(
-        backgroundColor: Colors.white,
-        elevation: 0,
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back, color: Colors.black87),
-          onPressed: () {
-            // Logika kembali
-            if (Navigator.canPop(context)) {
-              Navigator.pop(context);
-            }
-          },
+    // MEMBUNGKUS SCAFFOLD DENGAN GAMBAR BACKGROUND DARI ASSETS
+    return Container(
+      decoration: const BoxDecoration(
+        image: DecorationImage(
+          image: AssetImage('assets/background.png'),
+          fit: BoxFit.cover,
         ),
-        title: const Text(
-          'Jadwal',
-          style: TextStyle(
-            color: Colors.black87,
-            fontSize: 18,
-            fontWeight: FontWeight.w600,
-          ),
-        ),
-        centerTitle: true,
       ),
-      body: Column(
-        children: [
-          // Bagian Header (Tabs, Search, Filter) dengan background putih
-          Container(
-            color: Colors.white,
-            padding: const EdgeInsets.symmetric(vertical: 12),
-            child: Column(
-              children: [
-                _buildDateTabs(),
-                const SizedBox(height: 16),
-                _buildSearchBar(),
-                const SizedBox(height: 16),
-                _buildFilterChips(),
-              ],
-            ),
+      child: Scaffold(
+        // WAJIB TRANSPARAN AGAR GAMBAR BACKGROUND DI BELAKANGNYA TERLIHAT
+        backgroundColor: Colors.transparent,
+        appBar: AppBar(
+          backgroundColor: Colors.transparent, // Dibuat transparan agar menyatu dengan background
+          elevation: 0,
+          automaticallyImplyLeading: false, // Ini krusial: Mematikan auto-back button bawaan Flutter
+          title: const Text(
+            'Jadwal',
+            style: TextStyle(color: Colors.black87, fontSize: 18, fontWeight: FontWeight.bold),
           ),
-          
-          // Bagian List Jadwal
-          Expanded(
-            child: ListView.separated(
-              padding: const EdgeInsets.all(20),
-              itemCount: _schedules.length,
-              separatorBuilder: (context, index) => const SizedBox(height: 16),
-              itemBuilder: (context, index) {
-                final schedule = _schedules[index];
-                return _buildScheduleCard(schedule);
-              },
+          centerTitle: true,
+        ),
+        body: Column(
+          children: [
+            Container(
+              color: Colors.transparent,
+              padding: const EdgeInsets.symmetric(vertical: 8),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  _buildDateTabs(),
+                  const SizedBox(height: 16),
+                  _buildSearchBar(),
+                  const SizedBox(height: 16),
+                  _buildFilterChips(), 
+                ],
+              ),
             ),
-          ),
-        ],
+            
+            Expanded(
+              child: _filteredSchedules.isEmpty
+                  ? Center(
+                      child: Text('Tidak ada jadwal.', style: TextStyle(color: Colors.grey.shade600)),
+                    )
+                  : ListView.separated(
+                      physics: const AlwaysScrollableScrollPhysics(),
+                      padding: const EdgeInsets.all(20),
+                      itemCount: _filteredSchedules.length,
+                      separatorBuilder: (context, index) => const SizedBox(height: 12),
+                      itemBuilder: (context, index) {
+                        return _buildScheduleCard(_filteredSchedules[index]);
+                      },
+                    ),
+            ),
+          ],
+        ),
       ),
     );
   }
 
   // --- WIDGET BUILDERS ---
 
-  // 1. Tab Tanggal (Hari Ini, Besok, Mingguan)
   Widget _buildDateTabs() {
     final tabs = ['Hari Ini', 'Besok', 'Mingguan'];
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 20),
-      child: Row(
-        children: tabs.map((tab) {
-          final isSelected = _selectedTab == tab;
-          return Expanded(
-            child: GestureDetector(
-              onTap: () {
-                setState(() {
-                  _selectedTab = tab;
-                });
-              },
-              child: Container(
-                margin: const EdgeInsets.symmetric(horizontal: 4),
-                padding: const EdgeInsets.symmetric(vertical: 10),
-                decoration: BoxDecoration(
-                  color: isSelected ? primaryPink : Colors.transparent,
-                  borderRadius: BorderRadius.circular(20),
-                ),
-                alignment: Alignment.center,
-                child: Text(
-                  tab,
-                  style: TextStyle(
-                    color: isSelected ? Colors.white : Colors.grey.shade600,
-                    fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
-                    fontSize: 14,
+      child: Container(
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(30),
+          boxShadow: [
+            BoxShadow(color: Colors.black.withOpacity(0.02), blurRadius: 5, offset: const Offset(0, 2)),
+          ],
+        ),
+        child: Material(
+          color: Colors.transparent,
+          child: Row(
+            children: tabs.map((tab) {
+              final isSelected = _selectedTab == tab;
+              return Expanded(
+                child: InkWell(
+                  borderRadius: BorderRadius.circular(30),
+                  onTap: () {
+                    setState(() => _selectedTab = tab);
+                  },
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 8),
+                    decoration: BoxDecoration(
+                      color: isSelected ? primaryPink : Colors.transparent,
+                      borderRadius: BorderRadius.circular(30),
+                    ),
+                    alignment: Alignment.center,
+                    child: FittedBox(
+                      fit: BoxFit.scaleDown,
+                      child: Text(
+                        tab,
+                        style: TextStyle(
+                          color: isSelected ? Colors.white : Colors.black87,
+                          fontWeight: isSelected ? FontWeight.bold : FontWeight.w500,
+                          fontSize: 14,
+                        ),
+                      ),
+                    ),
                   ),
                 ),
-              ),
-            ),
-          );
-        }).toList(),
+              );
+            }).toList(),
+          ),
+        ),
       ),
     );
   }
 
-  // 2. Bar Pencarian
   Widget _buildSearchBar() {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 20),
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 16),
         decoration: BoxDecoration(
-          color: Colors.grey.shade100,
-          borderRadius: BorderRadius.circular(12),
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(16),
+          boxShadow: [
+            BoxShadow(color: Colors.black.withOpacity(0.02), blurRadius: 5, offset: const Offset(0, 2)),
+          ],
         ),
-        child: const TextField(
-          decoration: InputDecoration(
+        child: TextField(
+          controller: _searchController,
+          onChanged: (value) => _applyFilters(), 
+          decoration: const InputDecoration(
             icon: Icon(Icons.search, color: Colors.grey),
             hintText: 'Cari nama customer',
             hintStyle: TextStyle(color: Colors.grey, fontSize: 14),
@@ -169,38 +220,40 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
     );
   }
 
-  // 3. Filter Status (Semua, New, Accepted, dll)
   Widget _buildFilterChips() {
-    final filters = ['Semua', 'New', 'Accepted', 'OTW', 'Completed'];
+    final filters = ['Semua', 'New', 'Completed']; 
+    
     return SingleChildScrollView(
       scrollDirection: Axis.horizontal,
       padding: const EdgeInsets.symmetric(horizontal: 20),
       child: Row(
         children: filters.map((filter) {
           final isSelected = _selectedFilter == filter;
+
           return Padding(
-            padding: const EdgeInsets.only(right: 8),
-            child: GestureDetector(
-              onTap: () {
-                setState(() {
-                  _selectedFilter = filter;
-                });
-              },
-              child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                decoration: BoxDecoration(
-                  color: isSelected ? primaryPink : Colors.white,
-                  borderRadius: BorderRadius.circular(20),
-                  border: Border.all(
-                    color: isSelected ? primaryPink : Colors.grey.shade300,
+            padding: const EdgeInsets.only(right: 8.0), 
+            child: Material(
+              color: Colors.transparent,
+              child: InkWell(
+                borderRadius: BorderRadius.circular(20),
+                onTap: () {
+                  setState(() => _selectedFilter = filter);
+                  _applyFilters();
+                },
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                  decoration: BoxDecoration(
+                    color: isSelected ? primaryPink : Colors.white,
+                    borderRadius: BorderRadius.circular(20),
+                    border: Border.all(color: isSelected ? primaryPink : Colors.grey.shade200),
                   ),
-                ),
-                child: Text(
-                  filter,
-                  style: TextStyle(
-                    color: isSelected ? Colors.white : Colors.grey.shade700,
-                    fontSize: 12,
-                    fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                  child: Text(
+                    filter,
+                    style: TextStyle(
+                      color: isSelected ? Colors.white : Colors.black87,
+                      fontSize: 13,
+                      fontWeight: isSelected ? FontWeight.bold : FontWeight.w500,
+                    ),
                   ),
                 ),
               ),
@@ -211,12 +264,13 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
     );
   }
 
-  // 4. Card Item Jadwal (Sudah dilengkapi navigasi ke detail)
   Widget _buildScheduleCard(Map<String, dynamic> schedule) {
+    final String serviceType = schedule['service_type'] ?? 'home_service';
+    final bool isHomeService = serviceType == 'home_service';
+
     return GestureDetector(
       onTap: () {
-        // Navigasi ke halaman detail booking ketika kartu diklik
-        Navigator.pushNamed(context, '/booking_detail');
+        Navigator.pushNamed(context, '/booking_detail', arguments: schedule);
       },
       child: Container(
         padding: const EdgeInsets.all(16),
@@ -224,62 +278,85 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
           color: Colors.white,
           borderRadius: BorderRadius.circular(16),
           boxShadow: [
-            BoxShadow(
-              color: Colors.black.withOpacity(0.04),
-              blurRadius: 10,
-              offset: const Offset(0, 4),
-            ),
+            BoxShadow(color: Colors.black.withOpacity(0.03), blurRadius: 8, offset: const Offset(0, 4)),
           ],
         ),
         child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
+          crossAxisAlignment: CrossAxisAlignment.center, 
           children: [
-            // Kolom Waktu
-            SizedBox(
-              width: 50,
-              child: Text(
-                schedule['time'],
-                style: const TextStyle(
-                  fontSize: 16,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-            ),
-            const SizedBox(width: 12),
-            
-            // Kolom Detail
             Expanded(
-              child: Column(
+              child: Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Expanded(
-                        child: Text(
-                          schedule['name'],
-                          style: const TextStyle(
-                            fontSize: 14,
-                            fontWeight: FontWeight.bold,
-                          ),
+                  SizedBox(
+                    width: 55,
+                    child: Text(
+                      schedule['jam'] ?? '--:--',
+                      style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: Colors.black87),
+                    ),
+                  ),
+                  
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Expanded(
+                              child: Text(
+                                schedule['customer_fullname'] ?? 'Klien',
+                                style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: Colors.black87),
+                              ),
+                            ),
+                            _buildStatusBadge(schedule['status'] ?? 'Unknown'),
+                          ],
                         ),
-                      ),
-                      _buildStatusBadge(schedule['status']),
-                    ],
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    schedule['service'],
-                    style: const TextStyle(fontSize: 12, color: Colors.grey),
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    schedule['address'],
-                    style: const TextStyle(fontSize: 11, color: Colors.grey),
+                        const SizedBox(height: 6),
+                        
+                        Wrap(
+                          crossAxisAlignment: WrapCrossAlignment.center,
+                          spacing: 8,
+                          children: [
+                            Text(
+                              schedule['deskripsi'] ?? '-',
+                              style: TextStyle(fontSize: 13, color: Colors.grey.shade800),
+                            ),
+                            _buildServiceTypeBadge(isHomeService),
+                          ],
+                        ),
+                        const SizedBox(height: 6),
+                        
+                        Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Icon(
+                              isHomeService ? Icons.location_on : Icons.business, 
+                              size: 14, 
+                              color: isHomeService ? primaryPink : Colors.grey.shade600
+                            ),
+                            const SizedBox(width: 4),
+                            Expanded(
+                              child: Text(
+                                schedule['alamat'] ?? '-', 
+                                style: TextStyle(fontSize: 13, color: Colors.grey.shade600),
+                                maxLines: 2,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
                   ),
                 ],
               ),
+            ),
+            
+            const Padding(
+              padding: EdgeInsets.only(left: 8.0),
+              child: Icon(Icons.chevron_right, color: Colors.grey, size: 24),
             ),
           ],
         ),
@@ -287,27 +364,48 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
     );
   }
 
-  // Fungsi pembantu untuk membuat Badge Status dengan warna yang sesuai
+  Widget _buildServiceTypeBadge(bool isHomeService) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+      decoration: BoxDecoration(
+        color: isHomeService ? primaryPink.withOpacity(0.9) : const Color(0xFFF5E6D3), 
+        borderRadius: BorderRadius.circular(6),
+      ),
+      child: Text(
+        isHomeService ? 'Home Service 🏠' : 'On Site 🏥',
+        style: TextStyle(
+          color: isHomeService ? Colors.white : Colors.black87,
+          fontSize: 10,
+          fontWeight: FontWeight.bold,
+        ),
+      ),
+    );
+  }
+
   Widget _buildStatusBadge(String status) {
+    if (status.toLowerCase() == 'accepted' || status.toLowerCase() == 'otw') {
+      return const SizedBox.shrink(); 
+    }
+
     Color textColor;
     Color bgColor;
 
-    switch (status) {
-      case 'New':
-        textColor = Colors.blue.shade700;
-        bgColor = Colors.blue.shade50;
+    switch (status.toLowerCase()) {
+      case 'new':
+        textColor = const Color(0xFF1976D2);
+        bgColor = const Color(0xFFE3F2FD);
         break;
-      case 'Accepted':
-        textColor = Colors.purple.shade700;
-        bgColor = Colors.purple.shade50;
+      case 'accepted':
+        textColor = const Color(0xFF7B1FA2);
+        bgColor = const Color(0xFFF3E5F5);
         break;
-      case 'OTW':
-        textColor = Colors.orange.shade700;
-        bgColor = Colors.orange.shade50;
+      case 'otw':
+        textColor = const Color(0xFFE65100);
+        bgColor = const Color(0xFFFFF3E0);
         break;
-      case 'Completed':
-        textColor = Colors.green.shade700;
-        bgColor = Colors.green.shade50;
+      case 'completed':
+        textColor = const Color(0xFF388E3C);
+        bgColor = const Color(0xFFE8F5E9);
         break;
       default:
         textColor = Colors.grey.shade700;
@@ -322,11 +420,7 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
       ),
       child: Text(
         status,
-        style: TextStyle(
-          color: textColor,
-          fontSize: 10,
-          fontWeight: FontWeight.bold,
-        ),
+        style: TextStyle(color: textColor, fontSize: 11, fontWeight: FontWeight.bold),
       ),
     );
   }

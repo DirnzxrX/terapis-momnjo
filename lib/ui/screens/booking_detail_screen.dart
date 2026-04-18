@@ -1,401 +1,377 @@
 import 'package:flutter/material.dart';
 
-class BookingDetailScreen extends StatelessWidget {
+class BookingDetailScreen extends StatefulWidget {
   const BookingDetailScreen({Key? key}) : super(key: key);
 
-  // Warna-warna utama sesuai desain
-  final Color primaryRed = const Color(0xFFE57373); // Merah tombol OTW/Tolak
-  final Color statusPurple = const Color(0xFF9575CD); // Ungu label Accepted
-  final Color textGrey = const Color(0xFF757575); // Abu-abu buat label kecil
-  final Color bgLight = const Color(0xFFFFF8F8); // Background halaman agak pink muda muda
+  @override
+  State<BookingDetailScreen> createState() => _BookingDetailScreenState();
+}
+
+class _BookingDetailScreenState extends State<BookingDetailScreen> {
+  final Color primaryPink = const Color(0xFFE8647C);
+
+  String _currentStatus = '';
+  Map<String, dynamic>? _data;
+  bool _isInitialized = false;
+  
+  // STATE: Untuk menyimpan "titipan" data dari layar Active Job
+  Map<String, dynamic>? _savedActiveJobState; 
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (!_isInitialized) {
+      final args = ModalRoute.of(context)?.settings.arguments as Map<String, dynamic>?;
+      if (args != null) {
+        _data = args;
+        _currentStatus = args['status'] ?? 'Accepted';
+      } else {
+        _currentStatus = 'Accepted';
+      }
+      _isInitialized = true;
+    }
+  }
+
+  void _nextStatus() {
+    setState(() {
+      if (_currentStatus.toLowerCase() == 'accepted' || _currentStatus.toLowerCase() == 'new') {
+        _currentStatus = 'OTW';
+      } else if (_currentStatus.toLowerCase() == 'otw') {
+        _currentStatus = 'Arrived';
+      } else if (_currentStatus.toLowerCase() == 'arrived') {
+        _currentStatus = 'Started';
+      } else if (_currentStatus.toLowerCase() == 'started') {
+        _currentStatus = 'Completed';
+      }
+    });
+  }
+
+  // FUNGSI PUSAT: Membuka layar Job Aktif (ActiveJobScreen)
+  Future<void> _openActiveJob() async {
+    final result = await Navigator.pushNamed(
+      context, 
+      '/active_job',
+      arguments: {
+        ...?_data,
+        'savedState': _savedActiveJobState, 
+      },
+    );
+
+    if (result != null && result is Map) {
+      final Map<String, dynamic> resultMap = Map<String, dynamic>.from(result);
+
+      if (resultMap['action'] == 'finish_treatment') {
+        setState(() {
+          _currentStatus = 'Completed';
+        });
+        _data?['durasi_aktual'] = resultMap['durasi_aktual'];
+        
+        // MENYIMPAN STATE TERAKHIR: Dipaksa isPaused: true agar saat balik lagi waktunya tidak jalan otomatis
+        setState(() {
+          _savedActiveJobState = {
+            'secondsElapsed': resultMap['durasi_aktual'],
+            'hasStarted': true,
+            'isPaused': true, 
+            'stepsDone': resultMap['stepsDone'] ?? [true, true, true, true, true],
+          };
+        });
+      } else if (resultMap['action'] == 'save_state') {
+        setState(() {
+          _currentStatus = 'Started';
+          _savedActiveJobState = resultMap;
+        });
+      }
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: bgLight,
-      appBar: AppBar(
-        backgroundColor: bgLight,
-        elevation: 0,
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back, color: Colors.black87),
-          onPressed: () => Navigator.pop(context),
+    final String nama = _data?['customer_fullname'] ?? 'Dewi Lestari';
+    final String layanan = _data?['deskripsi'] ?? 'Mother Care Massage';
+    final String alamat = _data?['alamat'] ?? 'Jl. Melati No. 10, Bandung';
+
+    return Container(
+      decoration: const BoxDecoration(
+        image: DecorationImage(
+          image: AssetImage('assets/background.png'),
+          fit: BoxFit.cover,
         ),
-        title: const Text(
-          'Detail Booking',
-          style: TextStyle(
-            color: Colors.black87,
-            fontSize: 18,
-            fontWeight: FontWeight.bold,
-          ),
-        ),
-        centerTitle: true,
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.more_vert, color: Colors.black87),
-            onPressed: () {},
-          ),
-        ],
       ),
-      // Menggunakan Stack untuk memisahkan konten scrollable dan tombol fixed di bawah
-      body: Stack(
-        children: [
-          // 1. Konten Utama (Scrollable)
-          ListView(
-            padding: const EdgeInsets.fromLTRB(16, 16, 16, 100), // Padding bawah ekstra buat space tombol
-            children: [
-              // --- Bagian Atas: Label Status & Foto ---
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  // Label "Accepted"
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
-                    decoration: BoxDecoration(
-                      color: statusPurple,
-                      borderRadius: BorderRadius.circular(20),
-                    ),
-                    child: const Text(
-                      'Accepted',
-                      style: TextStyle(
-                        color: Colors.white,
-                        fontWeight: FontWeight.w600,
-                        fontSize: 13,
-                      ),
-                    ),
-                  ),
-                  // Foto Profil Bulat
-                  const CircleAvatar(
-                    radius: 30,
-                    // Gantilah NetworkImage dengan gambar profil asli
-                    backgroundImage: NetworkImage('https://via.placeholder.com/150'),
-                    backgroundColor: Colors.grey,
-                  ),
-                ],
-              ),
-              const SizedBox(height: 16),
-
-              // --- Bagian Identitas & Tombol Kontak ---
-              Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  // Nama & Nomor (Expanded agar teks tidak overflow)
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        const Text(
-                          'Dewi Lestari',
-                          style: TextStyle(
-                            fontSize: 18,
-                            fontWeight: FontWeight.bold,
-                            color: Colors.black87,
-                          ),
-                        ),
-                        const SizedBox(height: 4),
-                        Text(
-                          '0812 3456 7890',
-                          style: TextStyle(fontSize: 14, color: textGrey),
-                        ),
-                      ],
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  // Tombol Telepon Outlined
-                  _buildContactButton(Icons.call_outlined),
-                  const SizedBox(width: 12),
-                  // Tombol Chat Outlined
-                  _buildContactButton(Icons.chat_bubble_outline_rounded),
-                ],
-              ),
-              const SizedBox(height: 24),
-
-              // --- Kartu Alamat ---
-              _buildSectionCard(
-                child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Icon(Icons.location_on, color: primaryRed, size: 28),
-                    const SizedBox(width: 16),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          const Text(
-                            'Jl. Melati No. 10, Bandung',
-                            style: TextStyle(
-                                fontSize: 15,
-                                fontWeight: FontWeight.w600,
-                                color: Colors.black87),
-                          ),
-                          const SizedBox(height: 4),
-                          Text(
-                            'Patokan: Depan gerbang warna hitam',
-                            style: TextStyle(fontSize: 13, color: textGrey),
-                          ),
-                          const SizedBox(height: 8),
-                          const Text(
-                            'Lihat di Maps',
-                            style: TextStyle(
-                              fontSize: 13,
-                              color: Colors.blue,
-                              fontWeight: FontWeight.w600,
-                              decoration: TextDecoration.underline,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(height: 16),
-
-              // --- Kartu Layanan ---
-              _buildSectionCard(
+      child: Scaffold(
+        backgroundColor: Colors.transparent,
+        appBar: AppBar(
+          backgroundColor: Colors.transparent, 
+          elevation: 0,
+          leading: IconButton(
+            icon: const Icon(Icons.arrow_back, color: Colors.black87),
+            onPressed: () async {
+              // LOGIKA BAJAK: Jika status sudah Completed, tombol back akan mengedit data
+              if (_currentStatus.toLowerCase() == 'completed') {
+                setState(() {
+                  _currentStatus = 'Started'; 
+                });
+                await _openActiveJob();
+              } else {
+                Navigator.pop(context); // Kembali ke jadwal jika belum selesai
+              }
+            },
+          ),
+          title: const Text(
+            'Detail Booking', 
+            style: TextStyle(color: Colors.black87, fontSize: 18, fontWeight: FontWeight.bold)
+          ),
+          centerTitle: true,
+        ),
+        body: Column(
+          children: [
+            Expanded(
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
                 child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    Text('Layanan', style: TextStyle(fontSize: 12, color: textGrey)),
-                    const SizedBox(height: 6),
-                    const Text(
-                      'Mother Care Massage',
-                      style: TextStyle(
-                          fontSize: 16,
-                          fontWeight: FontWeight.bold,
-                          color: Colors.black87),
-                    ),
-                    const SizedBox(height: 12),
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        Text('Durasi', style: TextStyle(fontSize: 13, color: textGrey)),
-                        const Text(
-                          '90 menit',
-                          style: TextStyle(
-                              fontSize: 14,
-                              fontWeight: FontWeight.w600,
-                              color: Colors.black87),
-                        ),
-                      ],
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(height: 16),
-
-              // --- Kartu Catatan Customer ---
-              _buildSectionCard(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text('Catatan Customer', style: TextStyle(fontSize: 12, color: textGrey)),
-                    const SizedBox(height: 6),
-                    const Text(
-                      'Ibu hamil trimester 2, tidak ada keluhan',
-                      style: TextStyle(fontSize: 14, color: Colors.black87, height: 1.4),
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(height: 16),
-
-              // --- Kartu Timeline Status ---
-              _buildSectionCard(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
+                    _buildProfileCard(nama, _currentStatus),
+                    const SizedBox(height: 16),
+                    _buildLocationCard(alamat),
+                    const SizedBox(height: 16),
+                    _buildServiceCard(layanan),
+                    const SizedBox(height: 16),
+                    _buildNotesCard(),
+                    const SizedBox(height: 24),
                     const Text(
                       'Timeline Status',
-                      style: TextStyle(
-                          fontSize: 15,
-                          fontWeight: FontWeight.bold,
-                          color: Colors.black87),
+                      style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.black87),
                     ),
                     const SizedBox(height: 16),
-                    // Item Timeline 1 (Aktif/Hijau)
-                    _buildTimelineItem(
-                      status: 'Assigned',
-                      time: '13 Mei 08.30',
-                      isCompleted: true,
-                      isFirst: true,
-                    ),
-                    // Item Timeline 2 (Aktif/Hijau)
-                    _buildTimelineItem(
-                      status: 'Accepted',
-                      time: '13 Mei 08.32',
-                      isCompleted: true,
-                    ),
-                    // Item Timeline 3 (Belum/Abu)
-                    _buildTimelineItem(status: 'OTW', time: '-'),
-                    // Item Timeline 4 (Belum/Abu)
-                    _buildTimelineItem(status: 'Arrived', time: '-'),
-                    // Item Timeline 5 (Belum/Abu)
-                    _buildTimelineItem(status: 'Started', time: '-'),
-                    // Item Timeline 6 (Terakhir/Abu)
-                    _buildTimelineItem(status: 'Completed', time: '-', isLast: true),
+                    _buildTimeline(_currentStatus),
+                    const SizedBox(height: 40),
                   ],
                 ),
               ),
-            ],
-          ),
-
-          // 2. Tombol Aksi Bawah (Fixed di bawah)
-          Positioned(
-            bottom: 0,
-            left: 0,
-            right: 0,
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 20),
-              decoration: BoxDecoration(
-                color: bgLight,
-                // Sedikit shadow biar kelihatan misah sama konten scroll
-                boxShadow: [
-                  BoxShadow(color: Colors.black.withOpacity(0.03), blurRadius: 10, offset: const Offset(0, -5))
-                ]
-              ),
-              child: Row(
-                children: [
-                  // Tombol Tolak (Outlined Merah)
-                  Expanded(
-                    child: OutlinedButton(
-                      onPressed: () {},
-                      style: OutlinedButton.styleFrom(
-                        side: BorderSide(color: primaryRed, width: 1.5),
-                        padding: const EdgeInsets.symmetric(vertical: 16),
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                      ),
-                      child: Text(
-                        'Tolak',
-                        style: TextStyle(color: primaryRed, fontWeight: FontWeight.bold, fontSize: 16),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 16),
-                  // Tombol OTW (Filled Merah)
-                  Expanded(
-                    child: ElevatedButton(
-                      onPressed: () {},
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: primaryRed,
-                        elevation: 0,
-                        padding: const EdgeInsets.symmetric(vertical: 16),
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                      ),
-                      child: const Text(
-                        'OTW',
-                        style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16),
-                      ),
-                    ),
-                  ),
-                ],
-              ),
             ),
-          ),
-        ],
+            _buildBottomButton(),
+          ],
+        ),
       ),
     );
   }
 
-  // --- Helper Widget: Tombol Kontak (Telp/Chat) ---
-  Widget _buildContactButton(IconData icon) {
-    return Container(
-      decoration: BoxDecoration(
-        border: Border.all(color: Colors.grey.shade300, width: 1.5),
-        borderRadius: BorderRadius.circular(12),
-      ),
-      child: IconButton(
-        icon: Icon(icon, color: Colors.black54, size: 22),
-        onPressed: () {},
-      ),
-    );
-  }
+  // --- WIDGET BUILDERS ---
 
-  // --- Helper Widget: Container Kartu Putih ---
-  Widget _buildSectionCard({required Widget child}) {
+  Widget _buildProfileCard(String nama, String status) {
+    Color statusBg;
+    switch (status.toLowerCase()) {
+      case 'new': statusBg = Colors.blue.shade400; break;
+      case 'accepted': statusBg = const Color(0xFF9C27B0); break;
+      case 'otw': statusBg = Colors.orange.shade400; break;
+      case 'arrived': statusBg = Colors.teal.shade400; break;
+      case 'started': statusBg = Colors.indigo.shade400; break;
+      case 'completed': statusBg = Colors.green.shade500; break;
+      default: statusBg = Colors.grey;
+    }
+
     return Container(
-      width: double.infinity,
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(16),
-        // Shadow tipis biar elegan sesuai desain
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.04),
-            blurRadius: 10,
-            offset: const Offset(0, 4),
+        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.03), blurRadius: 8, offset: const Offset(0, 4))],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+            decoration: BoxDecoration(color: statusBg, borderRadius: BorderRadius.circular(20)),
+            child: Text(
+              status.toUpperCase(),
+              style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 11),
+            ),
+          ),
+          const SizedBox(height: 16),
+          Row(
+            children: [
+              const CircleAvatar(radius: 28, backgroundImage: NetworkImage('https://i.pravatar.cc/150?img=32')),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(nama, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                    const SizedBox(height: 4),
+                    const Text('0812 456 7890', style: TextStyle(fontSize: 13, color: Colors.black54)),
+                  ],
+                ),
+              ),
+              _buildSmallIconButton(Icons.phone_outlined),
+              const SizedBox(width: 8),
+              _buildSmallIconButton(Icons.chat_outlined),
+            ],
           ),
         ],
       ),
-      child: child,
     );
   }
 
-  // --- Helper Widget: Item Timeline Custom ---
-  Widget _buildTimelineItem({
-    required String status,
-    required String time,
-    bool isCompleted = false,
-    bool isFirst = false,
-    bool isLast = false,
-  }) {
-    // Warna hijau kalau selesai, abu kalau belum
-    final Color color = isCompleted ? const Color(0xFF4CAF50) : Colors.grey.shade300;
-    
-    return IntrinsicHeight(
+  Widget _buildSmallIconButton(IconData icon) {
+    return Container(
+      decoration: BoxDecoration(border: Border.all(color: Colors.grey.shade200), borderRadius: BorderRadius.circular(12)),
+      child: IconButton(icon: Icon(icon, size: 20, color: Colors.black87), onPressed: () {}),
+    );
+  }
+
+  Widget _buildLocationCard(String alamat) {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.03), blurRadius: 8, offset: const Offset(0, 4))],
+      ),
       child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Bagian Indikator (Garis & Lingkaran)
-          SizedBox(
-            width: 30,
+          const Icon(Icons.location_on_outlined, color: Colors.black87, size: 24),
+          const SizedBox(width: 12),
+          Expanded(
             child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                // Garis Atas (disembunyikan untuk item pertama)
-                Expanded(
-                  child: Container(width: 2, color: isFirst ? Colors.transparent : color),
-                ),
-                // Lingkaran Status
-                Container(
-                  width: 14,
-                  height: 14,
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    color: Colors.white,
-                    border: Border.all(color: color, width: 2.5),
-                  ),
-                ),
-                // Garis Bawah (disembunyikan untuk item terakhir)
-                Expanded(
-                  child: Container(width: 2, color: isLast ? Colors.transparent : color),
-                ),
+                Text(alamat, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold)),
+                const SizedBox(height: 4),
+                const Text('Patokan: Depan gerbang warna hitam', style: TextStyle(fontSize: 13, color: Colors.black54)),
+                const SizedBox(height: 8),
+                Text('Lihat di Maps', style: TextStyle(color: Colors.blue.shade700, fontWeight: FontWeight.bold)),
               ],
             ),
           ),
-          const SizedBox(width: 12),
-          // Bagian Teks (Nama Status & Waktu)
-          Expanded(
-            child: Padding(
-              padding: const EdgeInsets.symmetric(vertical: 8.0),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Text(
-                    status,
-                    style: TextStyle(
-                      fontSize: 14,
-                      fontWeight: isCompleted ? FontWeight.w600 : FontWeight.normal,
-                      color: isCompleted ? Colors.black87 : textGrey,
-                    ),
-                  ),
-                  Text(
-                    time,
-                    style: TextStyle(fontSize: 13, color: textGrey),
-                  ),
-                ],
-              ),
-            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildServiceCard(String layanan) {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.03), blurRadius: 8, offset: const Offset(0, 4))],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text('Layanan', style: TextStyle(fontSize: 12, color: Colors.black54)),
+          const SizedBox(height: 4),
+          Text(layanan, style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold)),
+          const SizedBox(height: 12),
+          const Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text('Durasi', style: TextStyle(fontSize: 13, color: Colors.black54)),
+              Text('90 menit', style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold)),
+            ],
           ),
         ],
+      ),
+    );
+  }
+
+  Widget _buildNotesCard() {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.03), blurRadius: 8, offset: const Offset(0, 4))],
+      ),
+      child: const Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text('Catatan Customer', style: TextStyle(fontSize: 12, color: Colors.black54, fontWeight: FontWeight.bold)),
+          SizedBox(height: 8),
+          Text('Ibu hamil trimester 2, tidak ada keluhan', style: TextStyle(fontSize: 14)),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildTimeline(String currentStatus) {
+    bool isOtw = ['otw', 'arrived', 'started', 'completed'].contains(currentStatus.toLowerCase());
+    bool isArrived = ['arrived', 'started', 'completed'].contains(currentStatus.toLowerCase());
+    bool isStarted = ['started', 'completed'].contains(currentStatus.toLowerCase());
+    bool isCompleted = currentStatus.toLowerCase() == 'completed';
+
+    return Column(
+      children: [
+        _buildTimelineStep('Assigned', '13 Mei 08.30', true, false),
+        _buildTimelineStep('OTW', isOtw ? 'Aktif' : '-', isOtw, false),
+        _buildTimelineStep('Arrived', isArrived ? 'Sampai' : '-', isArrived, false),
+        _buildTimelineStep('Started', isStarted ? 'Mulai' : '-', isStarted, false),
+        _buildTimelineStep('Completed', isCompleted ? 'Selesai' : '-', isCompleted, true),
+      ],
+    );
+  }
+
+  Widget _buildTimelineStep(String label, String time, bool done, bool last) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Column(
+          children: [
+            Icon(done ? Icons.check_circle : Icons.radio_button_unchecked, color: done ? Colors.green : Colors.grey, size: 20),
+            if (!last) Container(width: 2, height: 30, color: done ? Colors.green.withOpacity(0.5) : Colors.grey.shade300),
+          ],
+        ),
+        const SizedBox(width: 12),
+        Expanded(
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text(label, style: TextStyle(fontWeight: done ? FontWeight.bold : FontWeight.normal, color: done ? Colors.black87 : Colors.grey)),
+              Text(time, style: const TextStyle(fontSize: 12, color: Colors.black54)),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildBottomButton() {
+    String text = 'OTW';
+    if (_currentStatus.toLowerCase() == 'otw') text = 'ARRIVED';
+    else if (_currentStatus.toLowerCase() == 'arrived') text = 'START TREATMENT';
+    else if (_currentStatus.toLowerCase() == 'started') text = 'LANJUT TREATMENT';
+    else if (_currentStatus.toLowerCase() == 'completed') text = 'COMPLETE TREATMENT';
+
+    return Container(
+      padding: const EdgeInsets.all(20),
+      color: Colors.transparent, 
+      child: ElevatedButton(
+        onPressed: () async {
+          if (_currentStatus.toLowerCase() == 'arrived' || _currentStatus.toLowerCase() == 'started') {
+            if (_currentStatus.toLowerCase() == 'arrived') {
+              setState(() { _currentStatus = 'Started'; });
+            }
+            await _openActiveJob();
+          } 
+          else if (_currentStatus.toLowerCase() == 'completed') {
+            Navigator.pushReplacementNamed(
+              context, 
+              '/visit_report',
+              arguments: _data, 
+            );
+          } 
+          else {
+            _nextStatus();
+          }
+        },
+        style: ElevatedButton.styleFrom(
+          backgroundColor: primaryPink,
+          minimumSize: const Size(double.infinity, 54),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        ),
+        child: Text(text, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.white)),
       ),
     );
   }

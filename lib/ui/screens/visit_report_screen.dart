@@ -60,13 +60,7 @@ class VisitReportScreen extends StatelessWidget {
                   statusText: '1/1',
                 ),
                 _buildDivider(),
-                _buildReportItem(
-                  icon: Icons.lightbulb_outline,
-                  iconColor: Colors.amber,
-                  title: 'Rekomendasi',
-                  statusText: '1/1',
-                ),
-                _buildDivider(),
+                // PERHATIAN: Bagian "Rekomendasi" telah Dihapus dari sini sesuai permintaan Anda.
                 _buildReportItem(
                   icon: Icons.note_alt_outlined,
                   iconColor: Colors.blueGrey,

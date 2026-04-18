@@ -12,7 +12,8 @@ import 'package:therapist_momnjo/ui/screens/arrival_checkin_screen.dart';
 import 'package:therapist_momnjo/ui/screens/chat_admin_screen.dart';
 import 'package:therapist_momnjo/ui/screens/active_job_screen.dart';
 import 'package:therapist_momnjo/ui/screens/earnings_screen.dart';
-import 'package:therapist_momnjo/ui/screens/profile_screen.dart'; // Tambahkan import ProfileScreen
+import 'package:therapist_momnjo/ui/screens/profile_screen.dart';
+import 'package:therapist_momnjo/ui/screens/leave_management_screen.dart'; // Tambahkan import LeaveManagementScreen
 
 void main() {
   // Memastikan binding Flutter sudah terinisialisasi
@@ -91,7 +92,8 @@ class MomnjoTherapistApp extends StatelessWidget {
         '/chat_admin': (context) => const ChatAdminScreen(),
         '/booking_detail': (context) => const BookingDetailScreen(),
         '/earnings': (context) => const EarningsScreen(),
-        '/profile': (context) => const ProfileScreen(), // Tambahkan rute profile
+        '/profile': (context) => const ProfileScreen(), 
+        '/leave_management': (context) => const LeaveManagementScreen(),// Tambahkan rute profile
       },
 
       // Fallback jika rute yang dituju tidak ditemukan
