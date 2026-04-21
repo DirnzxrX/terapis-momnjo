@@ -1,5 +1,9 @@
 import 'package:flutter/material.dart';
+import 'package:therapist_momnjo/ui/screens/active_job_screen.dart';
+import 'package:therapist_momnjo/ui/screens/activity_detail_screen.dart';
 import 'package:therapist_momnjo/ui/screens/booking_detail_screen.dart';
+import 'package:therapist_momnjo/ui/screens/detail_laporan_screen.dart';
+import 'package:therapist_momnjo/ui/screens/request_payout_screen.dart';
 
 // Import semua screen yang sudah dibuat
 import 'package:therapist_momnjo/ui/screens/splash_screen.dart';
@@ -10,10 +14,18 @@ import 'package:therapist_momnjo/ui/screens/schedule_screen.dart';
 import 'package:therapist_momnjo/ui/screens/visit_report_screen.dart';
 import 'package:therapist_momnjo/ui/screens/arrival_checkin_screen.dart';
 import 'package:therapist_momnjo/ui/screens/chat_admin_screen.dart';
-import 'package:therapist_momnjo/ui/screens/active_job_screen.dart';
+import 'package:therapist_momnjo/ui/screens/activity_job_screen.dart';
 import 'package:therapist_momnjo/ui/screens/earnings_screen.dart';
 import 'package:therapist_momnjo/ui/screens/profile_screen.dart';
 import 'package:therapist_momnjo/ui/screens/leave_management_screen.dart'; // Tambahkan import LeaveManagementScreen
+import 'package:therapist_momnjo/ui/screens/active_job_screen.dart'; // Tambahkan import ActiveJobScreen
+import 'package:therapist_momnjo/ui/screens/activity_detail_screen.dart'; // Tambahkan import ActivityDetailScreen
+import 'package:therapist_momnjo/ui/screens/data_diri_screen.dart'; // Tambahkan import DataDiriScreen
+import 'package:therapist_momnjo/ui/screens/sop_panduan_screen.dart'; // Tambahkan import SOPPanduanScreen
+import 'package:therapist_momnjo/ui/screens/history_laporan_screen.dart'; // Tambahkan import SOPPanduanScreen
+import 'package:therapist_momnjo/ui/screens/bantuan_dukungan_screen.dart'; // Tambahkan import BantuanDukunganScreen
+import 'package:therapist_momnjo/ui/screens/detail_laporan_screen.dart'; // Tambahkan import DetailLaporanScreen
+import 'package:therapist_momnjo/ui/screens/booking_detail_onsite_screen.dart'; // Tambahkan import BookingDetailOnsiteScreen
 
 void main() {
   // Memastikan binding Flutter sudah terinisialisasi
@@ -93,7 +105,16 @@ class MomnjoTherapistApp extends StatelessWidget {
         '/booking_detail': (context) => const BookingDetailScreen(),
         '/earnings': (context) => const EarningsScreen(),
         '/profile': (context) => const ProfileScreen(), 
-        '/leave_management': (context) => const LeaveManagementScreen(),// Tambahkan rute profile
+        '/leave_management': (context) => const LeaveManagementScreen(),
+        '/activity_detail': (context) => const ActivityDetailScreen(),
+        '/request_payout': (context) => const RequestPayoutScreen(),
+        '/activity_job': (context) => const ActivityScreen(),
+        '/data_diri': (context) => const DataDiriScreen(),
+        '/sop_panduan': (context) => const SopPanduanScreen(),
+        '/history_laporan': (context) => const HistoryLaporanScreen(),
+        '/bantuan_dukungan': (context) => const BantuanDukunganScreen(),
+        '/detail_laporan': (context) => const DetailLaporanScreen(),
+        '/booking_detail_onsite': (context) => const  DetailBookingOnsiteScreen(),
       },
 
       // Fallback jika rute yang dituju tidak ditemukan
@@ -126,7 +147,7 @@ class _MainWrapperScreenState extends State<MainWrapperScreen> {
   final List<Widget> _pages = [
     const HomeScreen(),      // Index 0
     const ScheduleScreen(),  // Index 1
-    const ActiveJobScreen(), // Index 2
+    const ActivityScreen(), // Index 2
     const EarningsScreen(),  // Index 3
     const ProfileScreen(),   // Index 4 (Tambahkan halaman Profile)
   ];
@@ -176,19 +197,19 @@ class _MainWrapperScreenState extends State<MainWrapperScreen> {
             BottomNavigationBarItem(
               icon: Icon(Icons.calendar_today_outlined),
               activeIcon: Icon(Icons.calendar_today),
-              label: 'Jadwal',
+              label: 'Tugas',
             ),
             // Tab 2: Activity / Job Aktif
             BottomNavigationBarItem(
               icon: Icon(Icons.assignment_outlined),
               activeIcon: Icon(Icons.assignment),
-              label: 'Aktivitas',
+              label: 'Riwayat',
             ),
             // Tab 3: Earnings
             BottomNavigationBarItem(
               icon: Icon(Icons.monetization_on_outlined),
               activeIcon: Icon(Icons.monetization_on),
-              label: 'Earnings',
+              label: 'Pendapatan',
             ),
             // Tab 4: Profil
             BottomNavigationBarItem(

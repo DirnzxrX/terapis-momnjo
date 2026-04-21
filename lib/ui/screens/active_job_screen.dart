@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'dart:async';
+import 'package:therapist_momnjo/data/api_service.dart';
 
 class ActiveJobScreen extends StatefulWidget {
   const ActiveJobScreen({Key? key}) : super(key: key);
@@ -13,22 +14,21 @@ class _ActiveJobScreenState extends State<ActiveJobScreen> {
 
   Map<String, dynamic>? _bookingData;
   bool _isDataLoaded = false;
+  bool _isApiLoading = false; 
+
+  String _idTransaksi = '';
+  String _productName = '';
 
   Timer? _timer;
   int _secondsElapsed = 0; 
-  final int _estimatedTotalSeconds = 90 * 60; 
+  int _estimatedTotalSeconds = 0; // Akan dihitung otomatis
   
   bool _hasStarted = false; 
   bool _isPaused = false; 
 
-  final List<String> _steps = [
-    'Konsultasi & Anamnesa',
-    'Persiapan',
-    'Massage Punggung',
-    'Massage Kaki',
-    'Relaksasi & Finishing',
-  ];
-  List<bool> _stepsDone = [false, false, false, false, false];
+  // --- MENGGANTI _steps DENGAN DATA DINAMIS ---
+  List<dynamic> _treatments = [];
+  List<bool> _treatmentsDone = [];
 
   @override
   void didChangeDependencies() {
@@ -38,25 +38,59 @@ class _ActiveJobScreenState extends State<ActiveJobScreen> {
       if (args != null) {
         _bookingData = args;
         
+        _idTransaksi = args['id_transaksi']?.toString() ?? '';
+        _productName = args['product_name']?.toString() ?? 'Treatment';
+        
+        // Ambil list treatments
+        _treatments = args['treatments'] ?? [];
+
+        // --- LOGIKA AKUMULASI WAKTU ---
+        if (_treatments.isNotEmpty) {
+          int totalMenit = 0;
+          for (var item in _treatments) {
+            int dur = item is Map ? (int.tryParse(item['durasi']?.toString() ?? '60') ?? 60) : 60;
+            int qty = item is Map ? (int.tryParse(item['qty']?.toString() ?? '1') ?? 1) : 1;
+            totalMenit += (dur * qty);
+          }
+          _estimatedTotalSeconds = totalMenit * 60; // Konversi ke detik
+        } else {
+          // Fallback jika array treatments kosong
+          _estimatedTotalSeconds = _extractDurationFromProductName(_productName);
+        }
+
         if (args.containsKey('savedState') && args['savedState'] != null) {
           final saved = args['savedState'];
           _secondsElapsed = saved['secondsElapsed'] ?? 0;
           _hasStarted = saved['hasStarted'] ?? false;
           _isPaused = saved['isPaused'] ?? false;
           
-          if (saved['stepsDone'] != null) {
-            _stepsDone = List<bool>.from(saved['stepsDone']);
+          if (saved['treatmentsDone'] != null) {
+            _treatmentsDone = List<bool>.from(saved['treatmentsDone']);
+          } else {
+            _treatmentsDone = List.filled(_treatments.length, false);
           }
 
-          // PERBAIKAN FATAL: Selalu hidupkan mesin timer jika sudah pernah "Mulai"
-          // Walaupun sedang pause, mesin timer harus "standby" di background
           if (_hasStarted) {
             _startTimer();
           }
+        } else {
+          // Inisialisasi status checklist default (semua false)
+          _treatmentsDone = List.filled(_treatments.length, false);
         }
       }
       _isDataLoaded = true;
     }
+  }
+
+  int _extractDurationFromProductName(String name) {
+    final RegExp regExp = RegExp(r'(\d+)\s*(min|menit|mins)', caseSensitive: false);
+    final match = regExp.firstMatch(name);
+    
+    if (match != null) {
+      int minutes = int.tryParse(match.group(1) ?? '60') ?? 60;
+      return minutes * 60; 
+    }
+    return 60 * 60; 
   }
 
   @override
@@ -66,10 +100,9 @@ class _ActiveJobScreenState extends State<ActiveJobScreen> {
   }
 
   void _startTimer() {
-    // Cegah duplikasi timer
     _timer?.cancel(); 
     _timer = Timer.periodic(const Duration(seconds: 1), (timer) {
-      if (!_isPaused && mounted) { // Cek mounted agar tidak error saat layar pindah
+      if (!_isPaused && mounted) { 
         setState(() {
           _secondsElapsed++;
         });
@@ -77,7 +110,8 @@ class _ActiveJobScreenState extends State<ActiveJobScreen> {
     });
   }
 
-  void _handleTimerAction() {
+  Future<void> _handleTimerAction() async {
+    // KONDISI AWAL MULAI: Hanya jalankan timer lokal, TIDAK ADA tembak API
     if (!_hasStarted) {
       setState(() {
         _hasStarted = true;
@@ -85,12 +119,16 @@ class _ActiveJobScreenState extends State<ActiveJobScreen> {
       });
       _startTimer();
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("Treatment resmi dimulai"), duration: Duration(seconds: 1)),
+        const SnackBar(
+          content: Text("Treatment resmi dimulai", style: TextStyle(color: Colors.white)), 
+          backgroundColor: Colors.green, 
+          duration: Duration(seconds: 1)
+        ),
       );
     } else {
+      // PAUSE / RESUME BIASA
       setState(() {
         _isPaused = !_isPaused;
-        // JAGA-JAGA: Jika mesin timer mati karena suatu hal, hidupkan lagi saat unpause
         if (!_isPaused && (_timer == null || !_timer!.isActive)) {
           _startTimer();
         }
@@ -102,6 +140,77 @@ class _ActiveJobScreenState extends State<ActiveJobScreen> {
         ),
       );
     }
+  }
+
+  void _showFinishDialog() {
+    showDialog(
+      context: context,
+      barrierDismissible: !_isApiLoading,
+      builder: (context) {
+        return StatefulBuilder(
+          builder: (context, setDialogState) {
+            return AlertDialog(
+              title: const Text("Selesaikan Treatment?"),
+              content: _isApiLoading 
+                  ? const Row(
+                      children: [
+                        CircularProgressIndicator(),
+                        SizedBox(width: 16),
+                        Text("Mengirim ke server..."),
+                      ],
+                    )
+                  : const Text("Pastikan semua tahapan sudah selesai."),
+              actions: [
+                if (!_isApiLoading)
+                  TextButton(onPressed: () => Navigator.pop(context), child: const Text("Batal", style: TextStyle(color: Colors.grey))),
+                ElevatedButton(
+                  onPressed: _isApiLoading ? null : () async {
+                    setDialogState(() => _isApiLoading = true);
+                    
+                    final api = ApiService();
+                    bool isAllSuccess = true;
+                    String errorMessage = "";
+
+                    // --- LOOPING TEMBAK API UNTUK SETIAP TREATMENT ---
+                    for (var item in _treatments) {
+                      String currentProductName = item is Map ? (item['name'] ?? '') : item.toString();
+                      
+                      if (currentProductName.isNotEmpty) {
+                        final result = await api.updateJobStatus(_idTransaksi, currentProductName);
+                        
+                        if (result['status'] != 'success') {
+                          isAllSuccess = false;
+                          errorMessage = result['message'] ?? 'Gagal menyelesaikan $currentProductName';
+                          break; // Hentikan looping jika ada satu yang error dari server
+                        }
+                      }
+                    }
+                    
+                    if (mounted) setDialogState(() => _isApiLoading = false);
+
+                    if (isAllSuccess) {
+                      Navigator.pop(context); // Tutup dialog
+                      _timer?.cancel();
+                      
+                      // --- PERUBAHAN DI SINI ---
+                      // Semua sukses di server, kita kembali ke halaman Detail Booking
+                      Navigator.pop(context, {'action': 'completed'});
+                    } else {
+                      Navigator.pop(context); // Tutup dialog
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(content: Text(errorMessage), backgroundColor: Colors.red),
+                      );
+                    }
+                  },
+                  style: ElevatedButton.styleFrom(backgroundColor: primaryPink),
+                  child: const Text("Ya, Selesai", style: TextStyle(color: Colors.white)),
+                ),
+              ],
+            );
+          }
+        );
+      }
+    );
   }
 
   String _formatDuration(int totalSeconds) {
@@ -124,8 +233,9 @@ class _ActiveJobScreenState extends State<ActiveJobScreen> {
     _timer?.cancel();
     Navigator.pop(context, {
       'action': 'save_state',
+      'product_name': _productName,
       'secondsElapsed': _secondsElapsed,
-      'stepsDone': _stepsDone,
+      'treatmentsDone': _treatmentsDone, // Update key simpanan state
       'hasStarted': _hasStarted,
       'isPaused': _isPaused,
     });
@@ -164,7 +274,7 @@ class _ActiveJobScreenState extends State<ActiveJobScreen> {
                         const SizedBox(height: 16),
                         _buildTimerCard(),
                         const SizedBox(height: 24),
-                        _buildProgressSection(),
+                        _buildProgressSection(), // Menampilkan daftar card
                       ],
                     ),
                   ],
@@ -179,21 +289,30 @@ class _ActiveJobScreenState extends State<ActiveJobScreen> {
   }
 
   Widget _buildHeaderInfo() {
-    final String namaKlien = _bookingData?['customer_fullname'] ?? 'Klien';
-    final String layanan = _bookingData?['deskripsi'] ?? 'Layanan';
+    String rawCustomerName = _bookingData?['customer_name']?.toString() ?? '';
+    if (rawCustomerName.trim().isEmpty) {
+       rawCustomerName = _bookingData?['customer_fullname']?.toString() ?? ''; 
+    }
+    final String idBooking = _bookingData?['id_booking']?.toString() ?? '';
+    if (rawCustomerName.trim().isEmpty) rawCustomerName = idBooking;
+    
+    final String namaKlien = (rawCustomerName.trim().isNotEmpty && rawCustomerName != '-') ? rawCustomerName : 'Klien Tanpa Nama';
+    final String labelLayanan = _treatments.isNotEmpty ? '${_treatments.length} Layanan' : _productName;
 
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 20.0, vertical: 10.0),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(namaKlien, style: const TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.bold)),
-              const SizedBox(height: 4),
-              Text(layanan, style: const TextStyle(color: Colors.white, fontSize: 14)),
-            ],
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(namaKlien, style: const TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.bold), maxLines: 1, overflow: TextOverflow.ellipsis),
+                const SizedBox(height: 4),
+                Text(labelLayanan, style: const TextStyle(color: Colors.white, fontSize: 14), maxLines: 1, overflow: TextOverflow.ellipsis),
+              ],
+            ),
           ),
           Container(
             padding: const EdgeInsets.all(8),
@@ -251,47 +370,91 @@ class _ActiveJobScreenState extends State<ActiveJobScreen> {
     );
   }
 
+  // --- MERENDER DAFTAR CARD TREATMENT ---
   Widget _buildProgressSection() {
-    int finishedCount = _stepsDone.where((element) => element == true).length;
+    if (_treatments.isEmpty) return const SizedBox.shrink();
+
+    int finishedCount = _treatmentsDone.where((element) => element == true).length;
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.symmetric(horizontal: 20),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text('Progress Treatment', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+          const Text('Daftar Treatment', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
           const SizedBox(height: 4),
-          Text('$finishedCount dari ${_steps.length} selesai', style: TextStyle(fontSize: 12, color: Colors.grey.shade600)),
+          Text('$finishedCount dari ${_treatments.length} selesai dikerjakan', style: TextStyle(fontSize: 12, color: Colors.grey.shade600)),
           const SizedBox(height: 16),
-          for (int i = 0; i < _steps.length; i++)
-            _buildProgressItem(i, _steps[i], isDone: _stepsDone[i]),
+          for (int i = 0; i < _treatments.length; i++)
+            _buildTreatmentCard(i, _treatments[i], isDone: _treatmentsDone[i]),
         ],
       ),
     );
   }
 
-  Widget _buildProgressItem(int index, String title, {required bool isDone}) {
+  // --- WIDGET CARD UNTUK SETIAP TREATMENT ---
+  Widget _buildTreatmentCard(int index, dynamic item, {required bool isDone}) {
+    String name = item is Map ? (item['name'] ?? 'Layanan') : item.toString();
+    String qty = item is Map ? (item['qty']?.toString() ?? '1') : '1';
+    int durasiMenit = item is Map ? (int.tryParse(item['durasi']?.toString() ?? '60') ?? 60) : 60;
+
     return Padding(
-      padding: const EdgeInsets.only(bottom: 16.0),
+      padding: const EdgeInsets.only(bottom: 12.0),
       child: InkWell(
         onTap: () {
-          if (!_hasStarted) return;
-          setState(() { _stepsDone[index] = !_stepsDone[index]; });
+          // Hanya bisa diceklis jika job sudah di-start
+          if (!_hasStarted) {
+             ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(content: Text('Mulai treatment terlebih dahulu.'), duration: Duration(seconds: 1)),
+             );
+             return;
+          }
+          setState(() { _treatmentsDone[index] = !_treatmentsDone[index]; });
         },
-        child: Row(
-          children: [
-            Container(
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                color: isDone ? Colors.green : Colors.transparent,
-                border: Border.all(color: isDone ? Colors.green : Colors.grey.shade400, width: 2),
+        borderRadius: BorderRadius.circular(12),
+        child: Container(
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: isDone ? Colors.green.withOpacity(0.05) : Colors.white,
+            border: Border.all(color: isDone ? Colors.green.shade300 : Colors.grey.shade200),
+            borderRadius: BorderRadius.circular(12),
+            boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.02), blurRadius: 4, offset: const Offset(0, 2))],
+          ),
+          child: Row(
+            children: [
+              Container(
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: isDone ? Colors.green : Colors.transparent,
+                  border: Border.all(color: isDone ? Colors.green : Colors.grey.shade400, width: 2),
+                ),
+                padding: const EdgeInsets.all(2),
+                child: Icon(Icons.check, size: 16, color: isDone ? Colors.white : Colors.transparent),
               ),
-              padding: const EdgeInsets.all(2),
-              child: Icon(Icons.check, size: 14, color: isDone ? Colors.white : Colors.transparent),
-            ),
-            const SizedBox(width: 12),
-            Text(title, style: TextStyle(fontSize: 14, color: isDone ? Colors.black87 : Colors.grey.shade700)),
-          ],
+              const SizedBox(width: 16),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      name, 
+                      style: TextStyle(
+                        fontSize: 14, 
+                        fontWeight: FontWeight.bold,
+                        color: Colors.black87,
+                        decoration: isDone ? TextDecoration.lineThrough : null, // Efek coret jika selesai
+                      )
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      'Jumlah: $qty x  •  Durasi: $durasiMenit menit', 
+                      style: TextStyle(fontSize: 12, color: Colors.grey.shade600)
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -309,27 +472,29 @@ class _ActiveJobScreenState extends State<ActiveJobScreen> {
         children: [
           Expanded(
             child: OutlinedButton(
-              onPressed: _handleTimerAction,
+              onPressed: _isApiLoading ? null : _handleTimerAction,
               style: OutlinedButton.styleFrom(
                 side: BorderSide(color: btnColor, width: 2),
                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                 padding: const EdgeInsets.symmetric(vertical: 16),
               ),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Icon(btnIcon, color: btnColor, size: 18),
-                  const SizedBox(width: 6),
-                  Text(btnText, style: TextStyle(color: btnColor, fontWeight: FontWeight.bold)),
-                ],
-              ),
+              child: _isApiLoading && !_hasStarted
+                  ? const SizedBox(height: 18, width: 18, child: CircularProgressIndicator(strokeWidth: 2))
+                  : Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(btnIcon, color: btnColor, size: 18),
+                        const SizedBox(width: 6),
+                        Text(btnText, style: TextStyle(color: btnColor, fontWeight: FontWeight.bold)),
+                      ],
+                    ),
             ),
           ),
           const SizedBox(width: 16),
           Expanded(
             flex: 2,
             child: ElevatedButton(
-              onPressed: !_hasStarted ? null : _showFinishDialog,
+              onPressed: (!_hasStarted || _isApiLoading) ? null : _showFinishDialog,
               style: ElevatedButton.styleFrom(
                 backgroundColor: primaryPink,
                 padding: const EdgeInsets.symmetric(vertical: 16),
@@ -337,29 +502,6 @@ class _ActiveJobScreenState extends State<ActiveJobScreen> {
               ),
               child: const Text('Selesai Treatment', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
             ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  void _showFinishDialog() {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text("Selesaikan Treatment?"),
-        content: const Text("Pastikan semua tahapan sudah selesai."),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(context), child: const Text("Batal")),
-          ElevatedButton(
-            onPressed: () {
-              Navigator.pop(context); 
-              Navigator.pop(context, {
-                'action': 'finish_treatment',
-                'durasi_aktual': _secondsElapsed,
-              });
-            },
-            child: const Text("Ya, Selesai"),
           ),
         ],
       ),

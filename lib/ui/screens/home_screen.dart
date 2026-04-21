@@ -11,11 +11,20 @@ class HomeScreen extends StatefulWidget {
 
 class _HomeScreenState extends State<HomeScreen> {
   // --- STATE VARIABLES ---
-  String _namaTerapis = 'Terapis'; // Default awal
+  String _namaTerapis = 'Terapis'; 
+  String _fotoProfile = ''; 
   int _bookingHariIni = 0;
   int _selesai = 0;
+  String _pendapatan = 'Rp 0'; 
   Map<String, dynamic>? _nextBooking;
   bool _isLoading = true;
+
+  // STATE STATUS KERJA
+  bool _isOnDuty = false; 
+
+  // STATE NOTIFIKASI
+  bool _hasNewNotification = false;
+  List<Map<String, String>> _notifications = [];
 
   @override
   void initState() {
@@ -30,14 +39,11 @@ class _HomeScreenState extends State<HomeScreen> {
 
     try {
       final prefs = await SharedPreferences.getInstance();
-      
-      // LOGIKA DETEKSI: Ambil nama dari storage
       String? namaSimpanan = prefs.getString('nama_lengkap');
+      String? fotoSimpanan = prefs.getString('foto'); 
+      String namaTampil = 'Terapis'; 
       
-      // Debugging untuk membantu Anda melihat apa yang salah di terminal
-      debugPrint("🚨 NAMA DI STORAGE: $namaSimpanan");
-
-      String namaTampil = 'adisurya'; // Fallback absolut sesuai mockup
+      bool isOnDutySimpanan = prefs.getBool('is_on_duty') ?? false;
 
       if (namaSimpanan != null && namaSimpanan.trim().isNotEmpty) {
         namaTampil = namaSimpanan;
@@ -48,27 +54,70 @@ class _HomeScreenState extends State<HomeScreen> {
       
       int daily = 0;
       int completed = 0;
+      String incomeFormat = 'Rp 0';
+
       if (statsResponse['success'] == true && statsResponse['data'] != null) {
         daily = statsResponse['data']['total_bookings'] ?? 0;
         completed = statsResponse['data']['completed_jobs'] ?? 0;
+        
+        int rawIncome = statsResponse['data']['pendapatan'] ?? 0;
+        incomeFormat = 'Rp ${rawIncome.toString().replaceAllMapped(RegExp(r'(\d{1,3})(?=(\d{3})+(?!\d))'), (Match m) => '${m[1]}.')}';
       }
 
-      final jobsResponse = await api.getJobs(status: 'Open');
+      final jobsResponse = await api.getJobs();
       Map<String, dynamic>? nextBook;
+      List<Map<String, String>> newNotifs = [];
+      bool hasNewNotif = false;
       
       if (jobsResponse['success'] == true && jobsResponse['data'] != null) {
         List jobs = jobsResponse['data'];
-        if (jobs.isNotEmpty) {
-          nextBook = jobs[0]; 
+        
+        // --- PERBAIKAN 1: Filter hanya mencari tugas yang statusnya BUKAN closed/completed ---
+        List openJobs = jobs.where((job) {
+          final String status = (job['status'] ?? job['booking_status'] ?? '').toString().toLowerCase().trim();
+          return !['close', 'closed', 'completed'].contains(status);
+        }).toList();
+
+        if (openJobs.isNotEmpty) {
+          // --- PERBAIKAN BARU: Pengurutan data agar yang terbaru berada di paling atas ---
+          openJobs.sort((a, b) {
+            DateTime timeA = DateTime.tryParse(a['start_time']?.toString() ?? '') ?? DateTime(2000);
+            DateTime timeB = DateTime.tryParse(b['start_time']?.toString() ?? '') ?? DateTime(2000);
+            
+            // Membandingkan timeB dengan timeA (Descending/Terbaru di atas)
+            return timeB.compareTo(timeA); 
+          });
+
+          // Ambil job teratas (yang paling baru) dari list yang sudah diurutkan
+          nextBook = openJobs.first; 
+          
+          // SIMULASI NOTIFIKASI TUGAS BARU 
+          final namaKlien = nextBook?['customer_name'] ?? 'Klien';
+          final deskripsi = nextBook?['treatment_summary'] ?? 'Treatment';
+          final rawJam = nextBook?['start_time']?.toString() ?? '--:--';
+          
+          newNotifs.add({
+            'title': 'Tugas Baru Masuk!',
+            'body': 'Anda ditugaskan untuk melakukan $deskripsi kepada $namaKlien pada pukul ${_formatTime(rawJam)}.',
+            'time': 'Baru saja',
+          });
+          hasNewNotif = true;
         }
       }
 
       if (mounted) {
         setState(() {
           _namaTerapis = namaTampil;
+          _fotoProfile = fotoSimpanan ?? '';
+          _isOnDuty = isOnDutySimpanan; 
           _bookingHariIni = daily;
           _selesai = completed;
+          _pendapatan = incomeFormat;
           _nextBooking = nextBook;
+          
+          _notifications = newNotifs;
+          _hasNewNotification = hasNewNotif;
+          
           _isLoading = false;
         });
       }
@@ -78,65 +127,163 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
+  String _formatTime(String? rawTime) {
+    if (rawTime == null || rawTime.isEmpty) return '--:--';
+    try {
+      if (rawTime.contains(' ')) {
+        final timePart = rawTime.split(' ')[1]; 
+        final parts = timePart.split(':');
+        if (parts.length >= 2) return '${parts[0]}:${parts[1]}';
+      }
+      if (rawTime.split(':').length >= 2) {
+         final parts = rawTime.split(':');
+         return '${parts[0]}:${parts[1]}';
+      }
+      return rawTime;
+    } catch (e) {
+      return rawTime; 
+    }
+  }
+
+  void _showNotificationModal(BuildContext context) {
+    setState(() {
+      _hasNewNotification = false;
+    });
+
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      isScrollControlled: true,
+      builder: (context) {
+        return Container(
+          padding: const EdgeInsets.all(20),
+          decoration: const BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Center(
+                child: Container(
+                  width: 40, height: 4,
+                  decoration: BoxDecoration(color: Colors.grey.shade300, borderRadius: BorderRadius.circular(10)),
+                ),
+              ),
+              const SizedBox(height: 20),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text('Notifikasi', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: textDarkBrown)),
+                  if (_notifications.isNotEmpty)
+                    TextButton(
+                      onPressed: () {
+                        setState(() => _notifications.clear());
+                        Navigator.pop(context);
+                      },
+                      child: Text('Bersihkan', style: TextStyle(color: primaryPeach, fontWeight: FontWeight.bold)),
+                    )
+                ],
+              ),
+              const SizedBox(height: 10),
+              if (_notifications.isEmpty)
+                Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 30),
+                  child: Center(
+                    child: Text('Tidak ada pemberitahuan baru.', style: TextStyle(color: Colors.grey.shade500)),
+                  ),
+                )
+              else
+                ..._notifications.map((notif) => Container(
+                  margin: const EdgeInsets.only(bottom: 12),
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    color: primaryPeach.withOpacity(0.05),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: primaryPeach.withOpacity(0.2)),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Row(
+                            children: [
+                              Icon(Icons.assignment_turned_in, size: 16, color: primaryPeach),
+                              const SizedBox(width: 8),
+                              Text(notif['title']!, style: TextStyle(fontWeight: FontWeight.bold, color: textDarkBrown)),
+                            ],
+                          ),
+                          Text(notif['time']!, style: TextStyle(fontSize: 11, color: Colors.grey.shade600)),
+                        ],
+                      ),
+                      const SizedBox(height: 8),
+                      Text(notif['body']!, style: TextStyle(fontSize: 13, color: textDarkBrown.withOpacity(0.8), height: 1.4)),
+                    ],
+                  ),
+                )).toList(),
+              const SizedBox(height: 20),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  // --- DEFINISI WARNA DESAIN BARU ---
+  final Color textDarkBrown = const Color(0xFF4A332B);
+  final Color primaryPeach = const Color(0xFFECA898);
+  final Color goldBrown = const Color(0xFFB08D57);
+
   @override
   Widget build(BuildContext context) {
-    const primaryPink = Color(0xFFF48FB1);
-
-    return Scaffold(
-      backgroundColor: Colors.transparent, 
-      body: Container(
-        width: double.infinity,
-        height: double.infinity,
-        decoration: const BoxDecoration(
-          image: DecorationImage(
-            image: AssetImage('assets/background.png'), 
-            fit: BoxFit.cover,
-          ),
+    return Container(
+      decoration: const BoxDecoration(
+        image: DecorationImage(
+          image: AssetImage('assets/baground2.jpeg'), 
+          fit: BoxFit.cover,
         ),
-        child: SafeArea(
+      ),
+      child: Scaffold(
+        backgroundColor: Colors.transparent, 
+        body: SafeArea(
           child: RefreshIndicator(
-            onRefresh: _loadData,
-            color: primaryPink,
+            onRefresh: _loadData, 
+            color: primaryPeach,
             child: SingleChildScrollView(
               physics: const AlwaysScrollableScrollPhysics(),
-              padding: const EdgeInsets.all(20.0),
+              padding: const EdgeInsets.symmetric(horizontal: 20.0, vertical: 10.0),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  // 1. Header Profile
+                  const SizedBox(height: 10),
                   _buildHeader(),
                   const SizedBox(height: 24),
-
-                  // 2. Card Status Kerja
                   _buildStatusCard(),
                   const SizedBox(height: 24),
-
-                  // 3. Ringkasan Hari Ini
-                  const Text(
+                  Text(
                     'Ringkasan Hari Ini',
-                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.black87),
+                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: textDarkBrown),
                   ),
                   const SizedBox(height: 12),
                   _buildSummarySection(),
                   const SizedBox(height: 24),
-
-                  // 4. Booking Berikutnya
-                  const Text(
-                    'Booking Berikutnya',
-                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.black87),
+                  Text(
+                    'Tugas Berikutnya',
+                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: textDarkBrown),
                   ),
                   const SizedBox(height: 12),
-                  _buildNextBookingCard(context, primaryPink),
+                  _buildNextBookingCard(context),
                   const SizedBox(height: 24),
-
-                  // 5. Aksi Cepat
-                  const Text(
+                  Text(
                     'Aksi Cepat',
-                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.black87),
+                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: textDarkBrown),
                   ),
                   const SizedBox(height: 12),
                   _buildQuickActions(context), 
-                  const SizedBox(height: 20),
+                  const SizedBox(height: 30),
                 ],
               ),
             ),
@@ -149,44 +296,58 @@ class _HomeScreenState extends State<HomeScreen> {
   Widget _buildHeader() {
     return Row(
       children: [
-        Container(
-          width: 56,
-          height: 56,
-          decoration: BoxDecoration(
-            shape: BoxShape.circle,
-            color: Colors.pink.shade200, 
-          ),
-          child: const Icon(
-            Icons.person,
-            color: Colors.white,
-            size: 36,
-          ),
+        CircleAvatar(
+          radius: 28,
+          backgroundColor: Colors.grey.shade200,
+          backgroundImage: _fotoProfile.isNotEmpty && _fotoProfile.startsWith('http')
+              ? NetworkImage(_fotoProfile)
+              : const AssetImage('assets/default_profile.png') as ImageProvider, 
         ),
         const SizedBox(width: 12),
         Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text(
+            Text(
               'Selamat pagi,',
-              style: TextStyle(fontSize: 12, color: Colors.grey, fontWeight: FontWeight.w500), 
+              style: TextStyle(fontSize: 14, color: textDarkBrown.withOpacity(0.8), fontWeight: FontWeight.w500), 
             ),
-            // NAMA TERAPIS: Dipastikan tidak kosong
             Text(
               _namaTerapis,
-              style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w800, color: Colors.black87),
+              style: TextStyle(fontSize: 24, fontWeight: FontWeight.w900, color: textDarkBrown),
             ),
           ],
         ),
         const Spacer(),
-        IconButton(
-          onPressed: () {},
-          icon: const Icon(Icons.notifications_none_rounded, size: 28, color: Colors.black87),
+        Stack(
+          children: [
+            IconButton(
+              onPressed: () => _showNotificationModal(context),
+              icon: Icon(Icons.notifications_none_rounded, size: 28, color: textDarkBrown),
+            ),
+            if (_hasNewNotification)
+              Positioned(
+                right: 12,
+                top: 12,
+                child: Container(
+                  width: 10,
+                  height: 10,
+                  decoration: const BoxDecoration(
+                    color: Colors.red,
+                    shape: BoxShape.circle,
+                  ),
+                ),
+              ),
+          ],
         ),
       ],
     );
   }
 
   Widget _buildStatusCard() {
+    Color badgeColor = _isOnDuty ? const Color(0xFFE8F5E9) : Colors.grey.shade200;
+    Color textColor = _isOnDuty ? const Color(0xFF4CAF50) : Colors.grey.shade600;
+    String statusText = _isOnDuty ? 'ON DUTY' : 'OFF DUTY';
+
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
@@ -198,17 +359,23 @@ class _HomeScreenState extends State<HomeScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text('Status Kerja', style: TextStyle(fontSize: 12, color: Colors.grey, fontWeight: FontWeight.w500)),
-          const SizedBox(height: 8),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text('Status Kerja', style: TextStyle(fontSize: 13, color: textDarkBrown.withOpacity(0.8), fontWeight: FontWeight.w500)),
+              Text('Ubah di menu Absensi', style: TextStyle(fontSize: 10, color: Colors.grey.shade400, fontStyle: FontStyle.italic)),
+            ],
+          ),
+          const SizedBox(height: 12),
           Row(
             children: [
               Container(
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                decoration: BoxDecoration(color: const Color(0xFFE8F5E9), borderRadius: BorderRadius.circular(8)),
-                child: const Text('ON DUTY', style: TextStyle(color: Color(0xFF4CAF50), fontWeight: FontWeight.bold, fontSize: 11)),
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                decoration: BoxDecoration(color: badgeColor, borderRadius: BorderRadius.circular(8)),
+                child: Text(statusText, style: TextStyle(color: textColor, fontWeight: FontWeight.w800, fontSize: 11)),
               ),
-              const SizedBox(width: 12),
-              const Text('08.00 - 17.00', style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: Colors.black87)),
+              const SizedBox(width: 16),
+              Text('08.00 - 17.00', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w900, color: textDarkBrown)),
             ],
           ),
         ],
@@ -217,22 +384,38 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Widget _buildSummarySection() {
-    return IntrinsicHeight(
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Expanded(child: _buildSummaryCard(_isLoading ? '...' : _bookingHariIni.toString(), 'Booking Hari Ini', Colors.blue.shade300)),
-          const SizedBox(width: 12),
-          Expanded(child: _buildSummaryCard(_isLoading ? '...' : _selesai.toString(), 'Selesai', Colors.green.shade400)),
-          const SizedBox(width: 12),
-          Expanded(child: _buildSummaryCard('Rp 850.000', 'Pendapatan', const Color(0xFFD4AF37))),
-        ],
-      ),
+    return Row(
+      children: [
+        Expanded(
+          child: _buildSummaryCard(
+            _isLoading ? '...' : _bookingHariIni.toString(), 
+            'Booking Hari Ini', 
+            textDarkBrown,
+          ),
+        ),
+        const SizedBox(width: 12),
+        Expanded(
+          child: _buildSummaryCard(
+            _isLoading ? '...' : _selesai.toString(), 
+            'Selesai', 
+            textDarkBrown,
+          ),
+        ),
+        const SizedBox(width: 12),
+        Expanded(
+          child: _buildSummaryCard(
+            _isLoading ? '...' : _pendapatan, 
+            'Pendapatan', 
+            goldBrown,
+          ),
+        ),
+      ],
     );
   }
 
   Widget _buildSummaryCard(String value, String label, Color valueColor) {
     return Container(
+      height: 110, 
       padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 8),
       decoration: BoxDecoration(
         color: Colors.white,
@@ -244,28 +427,50 @@ class _HomeScreenState extends State<HomeScreen> {
         children: [
           FittedBox(
             fit: BoxFit.scaleDown,
-            child: Text(value, style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: valueColor)),
+            child: Text(value, style: TextStyle(fontSize: 24, fontWeight: FontWeight.w900, color: valueColor)),
           ),
           const SizedBox(height: 8),
-          Text(label, textAlign: TextAlign.center, style: const TextStyle(fontSize: 11, color: Colors.grey, fontWeight: FontWeight.w500)),
+          Text(label, textAlign: TextAlign.center, style: TextStyle(fontSize: 11, color: textDarkBrown.withOpacity(0.8), fontWeight: FontWeight.w500)),
         ],
       ),
     );
   }
 
-  Widget _buildNextBookingCard(BuildContext context, Color primaryColor) {
+  Widget _buildNextBookingCard(BuildContext context) {
     if (_isLoading) {
       return Container(
         padding: const EdgeInsets.all(24),
         alignment: Alignment.center,
         decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(16)),
-        child: const CircularProgressIndicator(),
+        child: CircularProgressIndicator(color: primaryPeach),
       );
     }
 
-    final jam = _nextBooking?['jam'] ?? '--:--';
-    final namaKlien = _nextBooking?['customer_fullname'] ?? 'Klien';
-    final deskripsi = _nextBooking?['deskripsi'] ?? 'Treatment Momnjo';
+    if (_nextBooking == null) {
+      return Container(
+        padding: const EdgeInsets.all(20),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(16),
+          boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.04), blurRadius: 10, offset: const Offset(0, 4))],
+        ),
+        child: Center(
+          child: Text('Belum ada tugas berikutnya', style: TextStyle(color: Colors.grey.shade500)),
+        ),
+      );
+    }
+
+    final rawJam = _nextBooking?['start_time']?.toString() ?? '--:--';
+    final jam = _formatTime(rawJam); 
+    final namaKlien = _nextBooking?['customer_name'] ?? 'Klien';
+    final deskripsi = _nextBooking?['treatment_summary'] ?? 'Treatment';
+    
+    final roomType = _nextBooking?['room_type']?.toString() ?? '';
+    final gerai = _nextBooking?['gerai']?.toString() ?? '';
+    String alamat = [gerai, roomType].where((e) => e.isNotEmpty).join(' - ');
+    if (alamat.isEmpty) {
+      alamat = 'Menunggu konfirmasi lokasi';
+    }
 
     return Container(
       padding: const EdgeInsets.all(16),
@@ -277,36 +482,48 @@ class _HomeScreenState extends State<HomeScreen> {
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.center,
         children: [
-          Text(jam, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w900, color: Colors.black87)),
+          Text(jam, style: TextStyle(fontSize: 22, fontWeight: FontWeight.w900, color: textDarkBrown)),
           const SizedBox(width: 16),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(namaKlien, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: Colors.black87)),
-                Text(deskripsi, style: const TextStyle(fontSize: 12, color: Colors.grey)),
-                const SizedBox(height: 4),
-                const Row(
+                Text(namaKlien, style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: textDarkBrown)),
+                Text(deskripsi, style: TextStyle(fontSize: 13, color: textDarkBrown.withOpacity(0.8))),
+                const SizedBox(height: 6),
+                Row(
                   children: [
-                    Icon(Icons.location_on, size: 12, color: Colors.grey),
-                    SizedBox(width: 4),
-                    Expanded(child: Text('Lokasi tidak tersedia', style: TextStyle(fontSize: 11, color: Colors.grey), maxLines: 1, overflow: TextOverflow.ellipsis)),
+                    Icon(Icons.location_on, size: 14, color: textDarkBrown.withOpacity(0.5)),
+                    const SizedBox(width: 4),
+                    Expanded(
+                      child: Text(alamat, 
+                        style: TextStyle(fontSize: 11, color: textDarkBrown.withOpacity(0.6)), 
+                        maxLines: 1, 
+                        overflow: TextOverflow.ellipsis
+                      ),
+                    ),
                   ],
                 ),
               ],
             ),
           ),
           ElevatedButton(
-            onPressed: () => _nextBooking != null ? Navigator.pushNamed(context, '/booking_detail') : null,
+            onPressed: () {
+              // --- PERBAIKAN 2: Auto-refresh saat kembali dari Detail ---
+              Navigator.pushNamed(context, '/booking_detail', arguments: _nextBooking).then((_) {
+                _loadData();
+              });
+            },
             style: ElevatedButton.styleFrom(
-              backgroundColor: primaryColor,
+              backgroundColor: primaryPeach,
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
               minimumSize: Size.zero,
+              elevation: 0,
             ),
             child: const Row(
               children: [
-                Text('Detail', style: TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold)),
+                Text('Detail', style: TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold)),
                 SizedBox(width: 2),
                 Icon(Icons.chevron_right, size: 14, color: Colors.white),
               ],
@@ -318,33 +535,58 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Widget _buildQuickActions(BuildContext context) {
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.spaceEvenly, 
+    return Column(
       children: [
-        _buildActionItem(Icons.history, 'Riwayat', Colors.red.shade400, onTap: () => Navigator.pushNamed(context, '/visit_report')),
-        _buildActionItem(Icons.assignment_turned_in, 'Absensi', Colors.blue.shade400, onTap: () => Navigator.pushNamed(context, '/arrival_checkin')),
-        _buildActionItem(Icons.chat_bubble_outline, 'Chat Admin', Colors.teal.shade400, onTap: () => Navigator.pushNamed(context, '/chat_admin')),
+        _buildActionItem(
+          Icons.history, 
+          'Laporan Kunjungan', 
+          onTap: () => Navigator.pushNamed(context, '/history_laporan')
+        ),
+        const SizedBox(height: 12),
+        _buildActionItem(
+          Icons.assignment_turned_in, 
+          'Absensi', 
+          onTap: () {
+            Navigator.pushNamed(context, '/leave_management').then((_) {
+              _loadData();
+            });
+          }
+        ),
+        const SizedBox(height: 12),
+        _buildActionItem(
+          Icons.chat_bubble_outline, 
+          'Chat Admin', 
+          onTap: () => Navigator.pushNamed(context, '/chat_admin')
+        ),
       ],
     );
   }
 
-  Widget _buildActionItem(IconData icon, String label, Color iconColor, {VoidCallback? onTap}) {
+  Widget _buildActionItem(IconData icon, String label, {VoidCallback? onTap}) {
     return GestureDetector(
       onTap: onTap, 
-      child: Column(
-        children: [
-          Container(
-            padding: const EdgeInsets.all(14),
-            decoration: BoxDecoration(
-              color: Colors.white,
-              borderRadius: BorderRadius.circular(16),
-              boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.04), blurRadius: 10, offset: const Offset(0, 4))],
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(16),
+          boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.03), blurRadius: 8, offset: const Offset(0, 4))],
+        ),
+        child: Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: textDarkBrown.withOpacity(0.1),
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Icon(icon, color: textDarkBrown, size: 20),
             ),
-            child: Icon(icon, color: iconColor, size: 28),
-          ),
-          const SizedBox(height: 8),
-          Text(label, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.black87)),
-        ],
+            const SizedBox(width: 16),
+            Text(label, style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: textDarkBrown)),
+          ],
+        ),
       ),
     );
   }

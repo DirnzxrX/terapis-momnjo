@@ -1,301 +1,139 @@
 import 'package:flutter/material.dart';
+import 'package:url_launcher/url_launcher.dart'; // Pastikan sudah menambahkan url_launcher di pubspec.yaml
 
-class ChatAdminScreen extends StatefulWidget {
+class ChatAdminScreen extends StatelessWidget {
   const ChatAdminScreen({Key? key}) : super(key: key);
 
-  @override
-  State<ChatAdminScreen> createState() => _ChatAdminScreenState();
-}
+  final Color primaryPink = const Color(0xFFE8647C);
+  final String adminPhoneNumber = "+6281387297524"; // Ganti dengan nomor admin Mom n Jo
 
-class _ChatAdminScreenState extends State<ChatAdminScreen> {
-  final Color primaryPink = const Color(0xFFF48FB1);
+  // --- FUNGSI UNTUK MEMBUKA WHATSAPP ---
+  Future<void> _openWhatsApp(BuildContext context) async {
+    final String message = "Halo Admin Mom n Jo, saya Rina (Terapis), ingin bertanya mengenai layanan dan jadwal kerja. Terima kasih!";
+    final String url = "https://wa.me/${adminPhoneNumber.replaceAll('+', '').replaceAll(' ', '')}?text=${Uri.encodeComponent(message)}";
+    
+    final Uri uri = Uri.parse(url);
+    
+    try {
+      if (await canLaunchUrl(uri)) {
+        await launchUrl(uri, mode: LaunchMode.externalApplication);
+      } else {
+        throw 'Tidak dapat membuka WhatsApp';
+      }
+    } catch (e) {
+      // Jika gagal membuka aplikasi WA (misal: tidak terinstall), munculkan pesan
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: const Text('Gagal membuka WhatsApp. Pastikan aplikasi WhatsApp terinstall.'),
+            backgroundColor: Colors.red.shade700,
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: const Color(0xFFFAFAFA),
-      appBar: AppBar(
-        backgroundColor: Colors.white,
-        elevation: 0,
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back, color: Colors.black87),
-          onPressed: () {
-            if (Navigator.canPop(context)) {
-              Navigator.pop(context);
-            }
-          },
-        ),
-        title: const Text(
-          'Chat Admin',
-          style: TextStyle(
-            color: Colors.black87,
-            fontSize: 18,
-            fontWeight: FontWeight.w600,
-          ),
-        ),
-        centerTitle: true,
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.more_vert, color: Colors.black87),
-            onPressed: () {},
-          ),
-        ],
-      ),
-      body: Column(
-        children: [
-          // 1. Header Profil Admin
-          _buildAdminHeader(),
-          
-          // 2. Area Percakapan (Chat Bubbles)
-          Expanded(
-            child: ListView(
-              padding: const EdgeInsets.all(20),
-              children: [
-                _buildReceiverMessage('Halo Rina, ada yang bisa dibantu?', '09:10'),
-                const SizedBox(height: 16),
-                _buildSenderMessage('Saya sudah sampai lokasi', '09:12'),
-                const SizedBox(height: 16),
-                _buildReceiverMessage('Terima kasih, selamat bekerja 🙏', '09:12'),
-                const SizedBox(height: 16),
-                _buildSenderMessage('Baik admin', '09:13'),
-              ],
-            ),
-          ),
-          
-          // 3. Quick Replies (Balasan Cepat)
-          _buildQuickReplies(),
-          
-          // 4. Input Area (Ketik Pesan)
-          _buildInputArea(),
-        ],
-      ),
-    );
-  }
-
-  // --- WIDGET BUILDERS ---
-
-  Widget _buildAdminHeader() {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        border: Border(
-          bottom: BorderSide(color: Colors.grey.shade200, width: 1),
+      decoration: const BoxDecoration(
+        image: DecorationImage(
+          image: AssetImage('assets/background.png'),
+          fit: BoxFit.cover,
         ),
       ),
-      child: Row(
-        children: [
-          const CircleAvatar(
-            radius: 20,
-            backgroundImage: NetworkImage('https://i.pravatar.cc/150?img=1'), // Placeholder foto admin
+      child: Scaffold(
+        backgroundColor: Colors.transparent,
+        appBar: AppBar(
+          backgroundColor: Colors.transparent,
+          elevation: 0,
+          leading: IconButton(
+            icon: const Icon(Icons.arrow_back, color: Colors.black87),
+            onPressed: () => Navigator.pop(context),
           ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Text(
-                  'Admin Mom n Jo',
-                  style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold),
-                ),
-                const SizedBox(height: 2),
-                Row(
-                  children: const [
-                    Text(
-                      'Online',
-                      style: TextStyle(fontSize: 12, color: Colors.grey),
-                    ),
-                  ],
-                ),
-              ],
-            ),
+          title: const Text(
+            'Chat Admin',
+            style: TextStyle(color: Colors.black87, fontWeight: FontWeight.bold, fontSize: 18),
           ),
-          IconButton(
-            icon: const Icon(Icons.call_outlined, color: Colors.black87, size: 22),
-            onPressed: () {},
-          ),
-          IconButton(
-            icon: const Icon(Icons.videocam_outlined, color: Colors.black87, size: 24),
-            onPressed: () {},
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildReceiverMessage(String message, String time) {
-    return Align(
-      alignment: Alignment.centerLeft,
-      child: Container(
-        margin: const EdgeInsets.only(right: 60),
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-        decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: const BorderRadius.only(
-            topLeft: Radius.circular(16),
-            topRight: Radius.circular(16),
-            bottomRight: Radius.circular(16),
-            bottomLeft: Radius.circular(4), // Sudut tajam untuk penerima
-          ),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withOpacity(0.04),
-              blurRadius: 5,
-              offset: const Offset(0, 2),
-            ),
-          ],
+          centerTitle: true,
         ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              message,
-              style: const TextStyle(fontSize: 14, color: Colors.black87),
-            ),
-            const SizedBox(height: 4),
-            Text(
-              time,
-              style: TextStyle(fontSize: 10, color: Colors.grey.shade500),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildSenderMessage(String message, String time) {
-    return Align(
-      alignment: Alignment.centerRight,
-      child: Container(
-        margin: const EdgeInsets.only(left: 60),
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-        decoration: BoxDecoration(
-          color: primaryPink.withOpacity(0.15), // Warna pink muda khas Mom n Jo
-          borderRadius: const BorderRadius.only(
-            topLeft: Radius.circular(16),
-            topRight: Radius.circular(16),
-            bottomLeft: Radius.circular(16),
-            bottomRight: Radius.circular(4), // Sudut tajam untuk pengirim
-          ),
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.end,
-          children: [
-            Text(
-              message,
-              style: const TextStyle(fontSize: 14, color: Colors.black87),
-            ),
-            const SizedBox(height: 4),
-            Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text(
-                  time,
-                  style: TextStyle(fontSize: 10, color: Colors.grey.shade600),
-                ),
-                const SizedBox(width: 4),
-                const Icon(Icons.done_all, size: 14, color: Colors.blue), // Tanda baca biru (read receipt)
-              ],
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildQuickReplies() {
-    final replies = ['Saya OTW', 'Sudah sampai', 'Customer tidak respon'];
-    
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-      color: const Color(0xFFFAFAFA),
-      child: SingleChildScrollView(
-        scrollDirection: Axis.horizontal,
-        child: Row(
-          children: replies.map((reply) {
-            return Padding(
-              padding: const EdgeInsets.only(right: 8.0),
-              child: OutlinedButton(
-                onPressed: () {},
-                style: OutlinedButton.styleFrom(
-                  side: BorderSide(color: Colors.grey.shade300),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(20),
-                  ),
-                  backgroundColor: Colors.white,
-                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                  minimumSize: Size.zero,
-                ),
-                child: Text(
-                  reply,
-                  style: const TextStyle(color: Colors.black87, fontSize: 13),
-                ),
-              ),
-            );
-          }).toList(),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildInputArea() {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.05),
-            blurRadius: 10,
-            offset: const Offset(0, -2),
-          ),
-        ],
-      ),
-      child: SafeArea(
-        child: Row(
-          children: [
-            Expanded(
-              child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 16),
-                decoration: BoxDecoration(
-                  color: Colors.grey.shade100,
-                  borderRadius: BorderRadius.circular(24),
-                ),
-                child: const TextField(
-                  decoration: InputDecoration(
-                    hintText: 'Ketik pesan...',
-                    hintStyle: TextStyle(color: Colors.grey, fontSize: 14),
-                    border: InputBorder.none,
-                  ),
-                ),
-              ),
-            ),
-            const SizedBox(width: 12),
-            IconButton(
-              icon: const Icon(Icons.attach_file, color: Colors.grey),
-              constraints: const BoxConstraints(),
-              padding: EdgeInsets.zero,
-              onPressed: () {},
-            ),
-            const SizedBox(width: 12),
-            IconButton(
-              icon: const Icon(Icons.camera_alt_outlined, color: Colors.grey),
-              constraints: const BoxConstraints(),
-              padding: EdgeInsets.zero,
-              onPressed: () {},
-            ),
-            const SizedBox(width: 12),
-            Container(
+        body: Center(
+          child: Padding(
+            padding: const EdgeInsets.all(30.0),
+            child: Container(
+              padding: const EdgeInsets.all(24),
               decoration: BoxDecoration(
-                color: primaryPink,
-                shape: BoxShape.circle,
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(20),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withOpacity(0.05),
+                    blurRadius: 15,
+                    offset: const Offset(0, 5),
+                  ),
+                ],
               ),
-              child: IconButton(
-                icon: const Icon(Icons.send, color: Colors.white, size: 18),
-                onPressed: () {},
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  // Icon WhatsApp atau Logo
+                  Container(
+                    padding: const EdgeInsets.all(16),
+                    decoration: BoxDecoration(
+                      color: Colors.green.shade50,
+                      shape: BoxShape.circle,
+                    ),
+                    child: Icon(Icons.chat_outlined, color: Colors.green.shade600, size: 50),
+                  ),
+                  const SizedBox(height: 20),
+                  const Text(
+                    'Hubungi Admin via WhatsApp',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.black87,
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  const Text(
+                    'Anda akan dialihkan ke aplikasi WhatsApp untuk berkomunikasi langsung dengan admin pusat Mom n Jo.',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      fontSize: 14,
+                      color: Colors.grey,
+                      height: 1.5,
+                    ),
+                  ),
+                  const SizedBox(height: 30),
+                  // Tombol Utama
+                  SizedBox(
+                    width: double.infinity,
+                    child: ElevatedButton.icon(
+                      onPressed: () => _openWhatsApp(context),
+                      icon: const Icon(Icons.phone_android, color: Colors.white),
+                      label: const Text(
+                        'Buka WhatsApp',
+                        style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16),
+                      ),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.green.shade600,
+                        padding: const EdgeInsets.symmetric(vertical: 16),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                        elevation: 0,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  Text(
+                    'Jam Operasional: 08:00 - 20:00 WIB',
+                    style: TextStyle(fontSize: 12, color: Colors.grey.shade400, fontStyle: FontStyle.italic),
+                  ),
+                ],
               ),
             ),
-          ],
+          ),
         ),
       ),
     );

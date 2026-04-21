@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import 'package:therapist_momnjo/data/api_service.dart';
+import 'package:intl/intl.dart'; 
 
 class ScheduleScreen extends StatefulWidget {
   const ScheduleScreen({Key? key}) : super(key: key);
@@ -8,54 +10,22 @@ class ScheduleScreen extends StatefulWidget {
 }
 
 class _ScheduleScreenState extends State<ScheduleScreen> {
-  String _selectedTab = 'Hari Ini';
-  String _selectedFilter = 'Semua'; 
-
+  String _selectedTab = 'Home Service'; 
+  
   final Color primaryPink = const Color(0xFFE8647C); 
+  final Color textDarkBrown = const Color(0xFF4A332B); 
   final TextEditingController _searchController = TextEditingController();
 
-  // --- DATA DUMMY HARDCODED ---
-  final List<Map<String, dynamic>> _dummySchedules = [
-    {
-      'jam': '08.00',
-      'customer_fullname': 'Siti Aisyah',
-      'deskripsi': 'Baby Spa',
-      'alamat': 'Jl. Mawar No. 5, Bandung',
-      'status': 'New',
-      'service_type': 'home_service',
-    },
-    {
-      'jam': '10.00',
-      'customer_fullname': 'Dewi Lestari',
-      'deskripsi': 'Mother Care Massage',
-      'alamat': 'MomNJO Clinic Bandung',
-      'status': 'Accepted',
-      'service_type': 'on_site',
-    },
-    {
-      'jam': '13.00',
-      'customer_fullname': 'Anita Putri',
-      'deskripsi': 'Totok Payudara',
-      'alamat': 'Perumahan Citra 2 Blok A8, Bandung',
-      'status': 'OTW',
-      'service_type': 'home_service',
-    },
-    {
-      'jam': '15.30',
-      'customer_fullname': 'Rizky Amelia',
-      'deskripsi': 'Lulur Hamil',
-      'alamat': 'MomNJO Clinic Bandung',
-      'status': 'Completed',
-      'service_type': 'on_site',
-    },
-  ];
-
-  List<Map<String, dynamic>> _filteredSchedules = [];
+  // --- STATE UNTUK API ---
+  List<dynamic> _apiSchedules = []; 
+  List<dynamic> _filteredSchedules = []; 
+  bool _isLoading = true;
+  String? _errorMessage;
 
   @override
   void initState() {
     super.initState();
-    _filteredSchedules = List.from(_dummySchedules);
+    _fetchSchedulesFromApi();
   }
 
   @override
@@ -64,25 +34,94 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
     super.dispose();
   }
 
+  // --- FUNGSI TARIK DATA API ---
+  Future<void> _fetchSchedulesFromApi() async {
+    if (!mounted) return;
+    setState(() {
+      _isLoading = true;
+      _errorMessage = null;
+    });
+
+    try {
+      final api = ApiService();
+      
+      // CATATAN: Pastikan fungsi getJobs() di ApiService Anda sudah mengarah 
+      // ke endpoint: /api_terapis/get_active_jobs.php atau get_all_jobs.php?status=open
+      final response = await api.getJobs(); 
+
+      if (response['success'] == true) {
+        if (mounted) {
+          setState(() {
+            _apiSchedules = response['data'] ?? [];
+            _applyFilters(); 
+            _isLoading = false;
+          });
+        }
+      } else {
+        if (mounted) {
+          setState(() {
+            _errorMessage = response['message'] ?? 'Gagal memuat jadwal dari server.';
+            _isLoading = false;
+          });
+        }
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _errorMessage = 'Terjadi kesalahan internal. Pastikan internet Anda stabil.';
+          _isLoading = false;
+        });
+      }
+    }
+  }
+
+  // --- FUNGSI FILTER LOKAL (Status, Kategori, Search & SORTING TERBARU) ---
   void _applyFilters() {
     setState(() {
-      _filteredSchedules = _dummySchedules.where((schedule) {
-        final status = schedule['status'] ?? '';
-        bool passStatus = (_selectedFilter == 'Semua') || 
-                          (status.toString().toLowerCase() == _selectedFilter.toLowerCase());
+      _filteredSchedules = _apiSchedules.where((schedule) {
+        // 1. FILTER STATUS (Sembunyikan job yang sudah close/closed/completed)
+        final String status = (schedule['status'] ?? schedule['booking_status'] ?? '').toString().toLowerCase().trim();
+        if (['close', 'closed', 'completed'].contains(status)) {
+          return false; // Jangan masukkan ke dalam list jika statusnya sudah selesai
+        }
 
-        final query = _searchController.text.toLowerCase();
-        final name = (schedule['customer_fullname'] ?? '').toString().toLowerCase();
-        bool passSearch = query.isEmpty || name.contains(query);
+        // 2. FILTER TIPE LAYANAN (Home Service vs Onsite)
+        bool isHome = schedule['room_type']?.toString().toLowerCase().contains('home') ?? false;
+        bool matchesTab = _selectedTab == 'Home Service' ? isHome : !isHome;
 
-        return passStatus && passSearch;
+        // 3. FILTER PENCARIAN (NAMA KLIEN / ID BOOKING)
+        final query = _searchController.text.toLowerCase().trim();
+        final name = (schedule['customer_name'] ?? '').toString().toLowerCase();
+        final idBook = (schedule['id_booking'] ?? '').toString().toLowerCase();
+        bool matchesSearch = query.isEmpty || name.contains(query) || idBook.contains(query);
+
+        // Gabungkan hasil filter kategori dan pencarian
+        return matchesTab && matchesSearch;
       }).toList();
+
+      // 4. SORTING: URUTKAN BERDASARKAN WAKTU TERBARU DI ATAS (Descending)
+      _filteredSchedules.sort((a, b) {
+        DateTime timeA = DateTime.tryParse(a['start_time']?.toString() ?? '') ?? DateTime(2000);
+        DateTime timeB = DateTime.tryParse(b['start_time']?.toString() ?? '') ?? DateTime(2000);
+        
+        return timeB.compareTo(timeA); // Membandingkan B terhadap A (Terbaru ke Terlama)
+      });
     });
+  }
+
+  // --- FUNGSI PEMBANTU FORMAT WAKTU ---
+  String _formatTime(String? raw) {
+    if (raw == null || raw.isEmpty) return '--:--';
+    try {
+      DateTime dt = DateTime.parse(raw);
+      return DateFormat('HH:mm').format(dt);
+    } catch (e) {
+      return '--:--';
+    }
   }
 
   @override
   Widget build(BuildContext context) {
-    // MEMBUNGKUS SCAFFOLD DENGAN GAMBAR BACKGROUND DARI ASSETS
     return Container(
       decoration: const BoxDecoration(
         image: DecorationImage(
@@ -91,105 +130,175 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
         ),
       ),
       child: Scaffold(
-        // WAJIB TRANSPARAN AGAR GAMBAR BACKGROUND DI BELAKANGNYA TERLIHAT
         backgroundColor: Colors.transparent,
         appBar: AppBar(
-          backgroundColor: Colors.transparent, // Dibuat transparan agar menyatu dengan background
+          backgroundColor: Colors.transparent, 
           elevation: 0,
-          automaticallyImplyLeading: false, // Ini krusial: Mematikan auto-back button bawaan Flutter
-          title: const Text(
-            'Jadwal',
-            style: TextStyle(color: Colors.black87, fontSize: 18, fontWeight: FontWeight.bold),
+          automaticallyImplyLeading: false, 
+          title: Text(
+            'Tugas',
+            style: TextStyle(color: textDarkBrown, fontSize: 24, fontWeight: FontWeight.w900),
           ),
           centerTitle: true,
         ),
-        body: Column(
-          children: [
-            Container(
-              color: Colors.transparent,
-              padding: const EdgeInsets.symmetric(vertical: 8),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  _buildDateTabs(),
-                  const SizedBox(height: 16),
-                  _buildSearchBar(),
-                  const SizedBox(height: 16),
-                  _buildFilterChips(), 
-                ],
+        body: RefreshIndicator(
+          onRefresh: _fetchSchedulesFromApi, // Pull-to-refresh sesuai anjuran backend
+          color: primaryPink,
+          child: Column(
+            children: [
+              Container(
+                color: Colors.transparent,
+                padding: const EdgeInsets.symmetric(vertical: 8),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    _buildCustomTabBar(), 
+                    const SizedBox(height: 16),
+                    _buildSearchBar(),
+                  ],
+                ),
               ),
-            ),
-            
-            Expanded(
-              child: _filteredSchedules.isEmpty
-                  ? Center(
-                      child: Text('Tidak ada jadwal.', style: TextStyle(color: Colors.grey.shade600)),
-                    )
-                  : ListView.separated(
-                      physics: const AlwaysScrollableScrollPhysics(),
-                      padding: const EdgeInsets.all(20),
-                      itemCount: _filteredSchedules.length,
-                      separatorBuilder: (context, index) => const SizedBox(height: 12),
-                      itemBuilder: (context, index) {
-                        return _buildScheduleCard(_filteredSchedules[index]);
-                      },
-                    ),
-            ),
-          ],
+              
+              Expanded(
+                child: _buildMainContent(),
+              ),
+            ],
+          ),
         ),
       ),
     );
   }
 
-  // --- WIDGET BUILDERS ---
+  // --- LOGIKA STATE RENDERER ---
+  Widget _buildMainContent() {
+    if (_isLoading) {
+      return Center(child: CircularProgressIndicator(color: primaryPink));
+    }
 
-  Widget _buildDateTabs() {
-    final tabs = ['Hari Ini', 'Besok', 'Mingguan'];
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 20),
-      child: Container(
-        decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(30),
-          boxShadow: [
-            BoxShadow(color: Colors.black.withOpacity(0.02), blurRadius: 5, offset: const Offset(0, 2)),
-          ],
-        ),
-        child: Material(
-          color: Colors.transparent,
-          child: Row(
-            children: tabs.map((tab) {
-              final isSelected = _selectedTab == tab;
-              return Expanded(
-                child: InkWell(
-                  borderRadius: BorderRadius.circular(30),
-                  onTap: () {
-                    setState(() => _selectedTab = tab);
-                  },
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 8),
-                    decoration: BoxDecoration(
-                      color: isSelected ? primaryPink : Colors.transparent,
-                      borderRadius: BorderRadius.circular(30),
-                    ),
-                    alignment: Alignment.center,
-                    child: FittedBox(
-                      fit: BoxFit.scaleDown,
-                      child: Text(
-                        tab,
-                        style: TextStyle(
-                          color: isSelected ? Colors.white : Colors.black87,
-                          fontWeight: isSelected ? FontWeight.bold : FontWeight.w500,
-                          fontSize: 14,
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
-              );
-            }).toList(),
+    if (_errorMessage != null) {
+      return SingleChildScrollView(
+        physics: const AlwaysScrollableScrollPhysics(),
+        child: Container(
+          height: 300,
+          alignment: Alignment.center,
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(Icons.error_outline, size: 48, color: Colors.red.shade300),
+              const SizedBox(height: 16),
+              Text(_errorMessage!, style: const TextStyle(color: Colors.black87)),
+              const SizedBox(height: 16),
+              ElevatedButton(
+                onPressed: _fetchSchedulesFromApi,
+                style: ElevatedButton.styleFrom(backgroundColor: primaryPink),
+                child: const Text('Coba Lagi', style: TextStyle(color: Colors.white)),
+              )
+            ],
           ),
         ),
+      );
+    }
+
+    if (_filteredSchedules.isEmpty) {
+      return SingleChildScrollView(
+        physics: const AlwaysScrollableScrollPhysics(), 
+        child: Container(
+          height: 300,
+          alignment: Alignment.center,
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(Icons.event_available, size: 60, color: Colors.grey.shade400),
+              const SizedBox(height: 16),
+              Text('Tidak ada jadwal aktif untuk kategori ini.', style: TextStyle(color: Colors.grey.shade600, fontWeight: FontWeight.bold)),
+            ],
+          ),
+        ),
+      );
+    }
+
+    return ListView.builder(
+      physics: const AlwaysScrollableScrollPhysics(),
+      padding: const EdgeInsets.only(left: 20, right: 20, top: 12, bottom: 20),
+      itemCount: _filteredSchedules.length,
+      itemBuilder: (context, index) {
+        return _buildScheduleCard(_filteredSchedules[index]);
+      },
+    );
+  }
+
+  // --- WIDGET BUILDERS ---
+
+  Widget _buildCustomTabBar() {
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 20),
+      padding: const EdgeInsets.all(4),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(30),
+        boxShadow: [
+          BoxShadow(color: Colors.black.withOpacity(0.02), blurRadius: 5, offset: const Offset(0, 2)),
+        ],
+      ),
+      child: Row(
+        children: [
+          // TAB 1: HOME SERVICE
+          Expanded(
+            child: GestureDetector(
+              onTap: () {
+                setState(() {
+                  _selectedTab = 'Home Service';
+                  _applyFilters();
+                });
+              },
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 200),
+                padding: const EdgeInsets.symmetric(vertical: 14),
+                decoration: BoxDecoration(
+                  color: _selectedTab == 'Home Service' ? primaryPink : Colors.transparent,
+                  borderRadius: BorderRadius.circular(30),
+                ),
+                alignment: Alignment.center,
+                child: Text(
+                  'Home Service',
+                  style: TextStyle(
+                    color: _selectedTab == 'Home Service' ? Colors.white : Colors.black87,
+                    fontWeight: FontWeight.bold,
+                    fontSize: 14,
+                  ),
+                ),
+              ),
+            ),
+          ),
+          // TAB 2: ONSITE
+          Expanded(
+            child: GestureDetector(
+              onTap: () {
+                setState(() {
+                  _selectedTab = 'Onsite';
+                  _applyFilters();
+                });
+              },
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 200),
+                padding: const EdgeInsets.symmetric(vertical: 14),
+                decoration: BoxDecoration(
+                  color: _selectedTab == 'Onsite' ? primaryPink : Colors.transparent,
+                  borderRadius: BorderRadius.circular(30),
+                ),
+                alignment: Alignment.center,
+                child: Text(
+                  'Onsite',
+                  style: TextStyle(
+                    color: _selectedTab == 'Onsite' ? Colors.white : Colors.black87,
+                    fontWeight: FontWeight.bold,
+                    fontSize: 14,
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -198,7 +307,7 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 20),
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 16),
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 2),
         decoration: BoxDecoration(
           color: Colors.white,
           borderRadius: BorderRadius.circular(16),
@@ -209,154 +318,149 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
         child: TextField(
           controller: _searchController,
           onChanged: (value) => _applyFilters(), 
-          decoration: const InputDecoration(
-            icon: Icon(Icons.search, color: Colors.grey),
-            hintText: 'Cari nama customer',
-            hintStyle: TextStyle(color: Colors.grey, fontSize: 14),
+          decoration: InputDecoration(
+            icon: Icon(Icons.search, color: Colors.grey.shade400),
+            hintText: 'Cari nama customer / id',
+            hintStyle: TextStyle(color: Colors.grey.shade400, fontSize: 14),
             border: InputBorder.none,
+            suffixIcon: _searchController.text.isNotEmpty 
+                ? IconButton(
+                    icon: const Icon(Icons.clear, size: 20),
+                    onPressed: () {
+                      _searchController.clear();
+                      _applyFilters();
+                    },
+                  )
+                : null,
           ),
         ),
       ),
     );
   }
 
-  Widget _buildFilterChips() {
-    final filters = ['Semua', 'New', 'Completed']; 
+  Widget _buildScheduleCard(Map<dynamic, dynamic> schedule) {
+    // Sesuai dengan field di JSON backend
+    bool isHomeService = schedule['room_type']?.toString().toLowerCase().contains('home') ?? false;
+    final String formattedTime = _formatTime(schedule['start_time']?.toString());
     
-    return SingleChildScrollView(
-      scrollDirection: Axis.horizontal,
-      padding: const EdgeInsets.symmetric(horizontal: 20),
-      child: Row(
-        children: filters.map((filter) {
-          final isSelected = _selectedFilter == filter;
-
-          return Padding(
-            padding: const EdgeInsets.only(right: 8.0), 
-            child: Material(
-              color: Colors.transparent,
-              child: InkWell(
-                borderRadius: BorderRadius.circular(20),
-                onTap: () {
-                  setState(() => _selectedFilter = filter);
-                  _applyFilters();
-                },
-                child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                  decoration: BoxDecoration(
-                    color: isSelected ? primaryPink : Colors.white,
-                    borderRadius: BorderRadius.circular(20),
-                    border: Border.all(color: isSelected ? primaryPink : Colors.grey.shade200),
-                  ),
-                  child: Text(
-                    filter,
-                    style: TextStyle(
-                      color: isSelected ? Colors.white : Colors.black87,
-                      fontSize: 13,
-                      fontWeight: isSelected ? FontWeight.bold : FontWeight.w500,
-                    ),
-                  ),
-                ),
-              ),
-            ),
-          );
-        }).toList(),
-      ),
-    );
-  }
-
-  Widget _buildScheduleCard(Map<String, dynamic> schedule) {
-    final String serviceType = schedule['service_type'] ?? 'home_service';
-    final bool isHomeService = serviceType == 'home_service';
+    // Tarik ID Booking & Customer Name
+    final String idBooking = schedule['id_booking']?.toString() ?? '';
+    final String customerName = schedule['customer_name']?.toString() ?? 'Klien Tanpa Nama';
+    
+    // Tampilkan ID Booking jika ada, jika kosong fallback ke nama klien
+    final String displayTitle = (idBooking.isNotEmpty && idBooking != '-') ? idBooking : customerName;
+    
+    // Alamat / Lokasi (Menggunakan Gerai atau Alamat fallback)
+    final String roomType = schedule['room_type']?.toString() ?? '';
+    final String gerai = schedule['gerai']?.toString() ?? '';
+    
+    String rawAlamat = [gerai, roomType].where((e) => e.isNotEmpty).join(' - ');
+    if (rawAlamat.isEmpty) {
+      // Fallback jaga-jaga kalau ada field alamat (meski tidak ada di sample response)
+      rawAlamat = schedule['alamat']?.toString() ?? 'Menunggu konfirmasi lokasi';
+    }
 
     return GestureDetector(
       onTap: () {
-        Navigator.pushNamed(context, '/booking_detail', arguments: schedule);
+        final Map<String, dynamic> safeSchedule = Map<String, dynamic>.from(schedule);
+        
+        // Begitu kita KEMBALI dari layar Detail Booking, otomatis _fetchSchedulesFromApi dipanggil.
+        // Karena statusnya di backend sudah bukan 'Open', maka data tersebut otomatis tidak dirender.
+        Navigator.pushNamed(context, '/booking_detail', arguments: safeSchedule).then((_) {
+          _fetchSchedulesFromApi();
+        });
       },
       child: Container(
-        padding: const EdgeInsets.all(16),
+        margin: const EdgeInsets.only(bottom: 16),
+        padding: const EdgeInsets.all(20),
         decoration: BoxDecoration(
           color: Colors.white,
-          borderRadius: BorderRadius.circular(16),
+          borderRadius: BorderRadius.circular(20),
           boxShadow: [
-            BoxShadow(color: Colors.black.withOpacity(0.03), blurRadius: 8, offset: const Offset(0, 4)),
+            BoxShadow(color: Colors.black.withOpacity(0.04), blurRadius: 10, offset: const Offset(0, 4)),
           ],
         ),
         child: Row(
-          crossAxisAlignment: CrossAxisAlignment.center, 
+          crossAxisAlignment: CrossAxisAlignment.start, 
           children: [
+            Padding(
+              padding: const EdgeInsets.only(top: 2.0),
+              child: SizedBox(
+                width: 65, 
+                child: Text(
+                  formattedTime,
+                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.w900, color: textDarkBrown, letterSpacing: 0.5),
+                ),
+              ),
+            ),
+            
             Expanded(
-              child: Row(
+              child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  SizedBox(
-                    width: 55,
-                    child: Text(
-                      schedule['jam'] ?? '--:--',
-                      style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: Colors.black87),
-                    ),
+                  Text(
+                    displayTitle, // ID Booking atau Nama Klien
+                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.w900, color: textDarkBrown),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
                   ),
                   
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Expanded(
-                              child: Text(
-                                schedule['customer_fullname'] ?? 'Klien',
-                                style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: Colors.black87),
-                              ),
-                            ),
-                            _buildStatusBadge(schedule['status'] ?? 'Unknown'),
-                          ],
-                        ),
-                        const SizedBox(height: 6),
-                        
-                        Wrap(
-                          crossAxisAlignment: WrapCrossAlignment.center,
-                          spacing: 8,
-                          children: [
-                            Text(
-                              schedule['deskripsi'] ?? '-',
-                              style: TextStyle(fontSize: 13, color: Colors.grey.shade800),
-                            ),
-                            _buildServiceTypeBadge(isHomeService),
-                          ],
-                        ),
-                        const SizedBox(height: 6),
-                        
-                        Row(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Icon(
-                              isHomeService ? Icons.location_on : Icons.business, 
-                              size: 14, 
-                              color: isHomeService ? primaryPink : Colors.grey.shade600
-                            ),
-                            const SizedBox(width: 4),
-                            Expanded(
-                              child: Text(
-                                schedule['alamat'] ?? '-', 
-                                style: TextStyle(fontSize: 13, color: Colors.grey.shade600),
-                                maxLines: 2,
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ],
+                  // Hanya munculkan nama klien di bawah ID Booking jika datanya berbeda dengan ID
+                  if (customerName.isNotEmpty && displayTitle != customerName) ...[
+                    const SizedBox(height: 4),
+                    Text(
+                      customerName,
+                      style: TextStyle(fontSize: 13, color: Colors.grey.shade700, fontWeight: FontWeight.w600),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
                     ),
+                  ],
+
+                  const SizedBox(height: 4),
+                  
+                  // Menggunakan treatment_summary dari API secara langsung
+                  Text(
+                    schedule['treatment_summary']?.toString() ?? 'Detail treatment tidak tersedia',
+                    style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: primaryPink),
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  
+                  const SizedBox(height: 12),
+                  
+                  _buildServiceTypeBadge(isHomeService),
+                  
+                  const SizedBox(height: 12),
+                  
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Icon(
+                        Icons.location_on, 
+                        size: 16, 
+                        color: primaryPink
+                      ),
+                      const SizedBox(width: 4),
+                      Expanded(
+                        child: Text(
+                          rawAlamat, 
+                          style: TextStyle(
+                            fontSize: 13, 
+                            color: Colors.grey.shade600,
+                          ),
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                    ],
                   ),
                 ],
               ),
             ),
             
-            const Padding(
-              padding: EdgeInsets.only(left: 8.0),
-              child: Icon(Icons.chevron_right, color: Colors.grey, size: 24),
+            Align(
+              alignment: Alignment.center,
+              child: Icon(Icons.chevron_right, color: Colors.grey.shade400, size: 24),
             ),
           ],
         ),
@@ -366,61 +470,19 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
 
   Widget _buildServiceTypeBadge(bool isHomeService) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-      decoration: BoxDecoration(
-        color: isHomeService ? primaryPink.withOpacity(0.9) : const Color(0xFFF5E6D3), 
-        borderRadius: BorderRadius.circular(6),
-      ),
-      child: Text(
-        isHomeService ? 'Home Service 🏠' : 'On Site 🏥',
-        style: TextStyle(
-          color: isHomeService ? Colors.white : Colors.black87,
-          fontSize: 10,
-          fontWeight: FontWeight.bold,
-        ),
-      ),
-    );
-  }
-
-  Widget _buildStatusBadge(String status) {
-    if (status.toLowerCase() == 'accepted' || status.toLowerCase() == 'otw') {
-      return const SizedBox.shrink(); 
-    }
-
-    Color textColor;
-    Color bgColor;
-
-    switch (status.toLowerCase()) {
-      case 'new':
-        textColor = const Color(0xFF1976D2);
-        bgColor = const Color(0xFFE3F2FD);
-        break;
-      case 'accepted':
-        textColor = const Color(0xFF7B1FA2);
-        bgColor = const Color(0xFFF3E5F5);
-        break;
-      case 'otw':
-        textColor = const Color(0xFFE65100);
-        bgColor = const Color(0xFFFFF3E0);
-        break;
-      case 'completed':
-        textColor = const Color(0xFF388E3C);
-        bgColor = const Color(0xFFE8F5E9);
-        break;
-      default:
-        textColor = Colors.grey.shade700;
-        bgColor = Colors.grey.shade100;
-    }
-
-    return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
       decoration: BoxDecoration(
-        color: bgColor,
+        color: Colors.grey.shade100,
         borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: Colors.grey.shade300)
       ),
       child: Text(
-        status,
-        style: TextStyle(color: textColor, fontSize: 11, fontWeight: FontWeight.bold),
+        isHomeService ? 'Home Service 🏠' : 'Onsite 🏢',
+        style: const TextStyle(
+          color: Colors.black87,
+          fontSize: 11,
+          fontWeight: FontWeight.bold,
+        ),
       ),
     );
   }

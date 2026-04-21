@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/gestures.dart';
 import 'package:therapist_momnjo/data/api_service.dart';
 import 'package:therapist_momnjo/ui/widgets/hourglass_loading.dart';
 
@@ -11,7 +10,7 @@ class LoginScreen extends StatefulWidget {
 }
 
 class _LoginScreenState extends State<LoginScreen> {
-  final TextEditingController _emailController = TextEditingController();
+  final TextEditingController _usernameController = TextEditingController(); 
   final TextEditingController _passwordController = TextEditingController();
 
   bool _isPasswordVisible = false;
@@ -20,29 +19,21 @@ class _LoginScreenState extends State<LoginScreen> {
 
   @override
   void dispose() {
-    _emailController.dispose();
+    _usernameController.dispose();
     _passwordController.dispose();
     super.dispose();
   }
 
   Future<void> _handleLogin() async {
-    String inputUser = _emailController.text.trim();
-    final password = _passwordController.text;
+    // Sesuai dokumen backend: pastikan di-trim agar spasi dari autocomplete tidak ikut terkirim
+    String inputUser = _usernameController.text.trim();
+    String password = _passwordController.text.trim();
 
     if (inputUser.isEmpty || password.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Nomor HP/Email dan Password wajib diisi!')),
+        const SnackBar(content: Text('Username dan Password wajib diisi!')),
       );
       return;
-    }
-
-    bool isPhoneNumber = RegExp(r'^[\+\-\d\s]+$').hasMatch(inputUser);
-
-    if (isPhoneNumber) {
-      inputUser = inputUser.replaceAll(RegExp(r'[\s\-]'), '');
-      if (inputUser.startsWith('+62')) {
-        inputUser = '0${inputUser.substring(3)}';
-      }
     }
 
     setState(() {
@@ -52,28 +43,27 @@ class _LoginScreenState extends State<LoginScreen> {
     final api = ApiService();
     final response = await api.login(inputUser, password);
 
-    if (mounted) {
-      setState(() {
-        _isLoading = false;
-      });
-    }
+    // Pastikan widget masih aktif setelah proses await selesai
+    if (!mounted) return;
+
+    setState(() {
+      _isLoading = false;
+    });
 
     if (response['success'] == true) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Selamat datang, ${response['data']['nama_lengkap']}!')),
-        );
-        Navigator.pushReplacementNamed(context, '/main');
-      }
+      final nama = response['data']['nama_lengkap'] ?? '';
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Selamat datang, $nama!')),
+      );
+      // Rute tetap sesuai instruksi
+      Navigator.pushReplacementNamed(context, '/main');
     } else {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(response['message'] ?? 'Login gagal. Silakan coba lagi.'),
-            backgroundColor: Colors.red.shade400,
-          ),
-        );
-      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(response['message'] ?? 'Login gagal. Silakan coba lagi.'),
+          backgroundColor: Colors.red.shade400,
+        ),
+      );
     }
   }
 
@@ -131,15 +121,15 @@ class _LoginScreenState extends State<LoginScreen> {
 
                   const SizedBox(height: 32),
 
-                  const Text('Nomor HP / Email',
+                  const Text('Username',
                       style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
                   const SizedBox(height: 8),
 
                   TextField(
-                    controller: _emailController,
-                    keyboardType: TextInputType.emailAddress,
+                    controller: _usernameController,
+                    keyboardType: TextInputType.text,
                     decoration: InputDecoration(
-                      hintText: 'Masukkan nomor HP / email',
+                      hintText: 'Masukkan username',
                       filled: true,
                       fillColor: Colors.white,
                       contentPadding:
@@ -197,16 +187,7 @@ class _LoginScreenState extends State<LoginScreen> {
                           const Text('Ingat saya', style: TextStyle(fontSize: 12)),
                         ],
                       ),
-                      TextButton(
-                        onPressed: () {},
-                        child: const Text(
-                          'Lupa Password?',
-                          style: TextStyle(
-                              fontSize: 12,
-                              color: Color(0xFFF48FB1),
-                              fontWeight: FontWeight.bold),
-                        ),
-                      ),
+
                     ],
                   ),
 
@@ -224,31 +205,7 @@ class _LoginScreenState extends State<LoginScreen> {
                         ? const HourglassLoading(size: 24, color: Colors.white)
                         : const Text('Masuk',
                             style: TextStyle(
-                                fontSize: 16, fontWeight: FontWeight.bold)),
-                  ),
-
-                  const SizedBox(height: 32),
-
-                  Center(
-                    child: RichText(
-                      text: TextSpan(
-                        text: 'Belum punya akun? ',
-                        style:
-                            const TextStyle(color: Colors.grey, fontSize: 12),
-                        children: [
-                          TextSpan(
-                            text: 'Daftar Sekarang',
-                            style: const TextStyle(
-                                color: Color(0xFFF48FB1),
-                                fontWeight: FontWeight.bold),
-                            recognizer: TapGestureRecognizer()
-                              ..onTap = () {
-                                Navigator.pushNamed(context, '/register');
-                              },
-                          ),
-                        ],
-                      ),
-                    ),
+                                fontSize: 16, fontWeight: FontWeight.bold, color: Colors.white)),
                   ),
 
                   const SizedBox(height: 20),

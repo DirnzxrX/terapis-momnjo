@@ -1,14 +1,59 @@
 import 'package:flutter/material.dart';
-// WAJIB DITAMBAHKAN: Import ApiService untuk menghapus sesi dari backend/lokal
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:therapist_momnjo/data/api_service.dart';
-import 'settings_screen.dart'; // Pastikan file ini ada di folder yang sama atau sesuaikan path-nya
+import 'package:therapist_momnjo/ui/screens/sop_panduan_screen.dart';
+import 'settings_screen.dart';
+import 'data_diri_screen.dart'; 
 
-class ProfileScreen extends StatelessWidget {
+class ProfileScreen extends StatefulWidget {
   const ProfileScreen({Key? key}) : super(key: key);
 
-  final Color primaryPink = const Color(0xFFE8647C); // Pink sesuai tema mockup baru
+  @override
+  State<ProfileScreen> createState() => _ProfileScreenState();
+}
 
-  // --- LOGIKA LOGOUT DITAMBAHKAN DI SINI ---
+class _ProfileScreenState extends State<ProfileScreen> {
+  final Color primaryPink = const Color(0xFFE8647C); 
+
+  // --- STATE VARIABLE UNTUK DATA DINAMIS ---
+  String _therapistName = "Memuat...";
+  String _therapistId = "-";
+  bool _isLoading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadProfileData();
+  }
+
+  // --- FUNGSI MENGAMBIL DATA DARI SHARED PREFERENCES ---
+  Future<void> _loadProfileData() async {
+    try {
+      SharedPreferences prefs = await SharedPreferences.getInstance();
+      
+      // Sesuaikan key string ini ('fullname' atau 'nama') dengan apa yang
+      // teman backend Anda kirimkan saat proses login.
+      String name = prefs.getString('fullname') ?? prefs.getString('nama') ?? 'Terapis Mom n Jo';
+      String id = prefs.getString('username') ?? prefs.getString('id_terapis') ?? 'TRP-000';
+
+      if (mounted) {
+        setState(() {
+          _therapistName = name;
+          _therapistId = id;
+          _isLoading = false;
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _therapistName = "Terapis Mom n Jo";
+          _isLoading = false;
+        });
+      }
+    }
+  }
+
+  // --- LOGIKA LOGOUT ---
   void _handleLogout(BuildContext context) {
     showDialog(
       context: context,
@@ -25,17 +70,13 @@ class ProfileScreen extends StatelessWidget {
             ),
             ElevatedButton(
               onPressed: () async {
-                // 1. Tutup dialog
                 Navigator.pop(dialogContext);
-                
-                // 2. Hapus sesi via ApiService
                 await ApiService().logout();
 
-                // 3. Hancurkan semua tumpukan layar dan lempar ke Login
                 if (context.mounted) {
                   Navigator.pushNamedAndRemoveUntil(
                     context, 
-                    '/login', // Pastikan rute ini terdaftar di main.dart
+                    '/login', 
                     (Route<dynamic> route) => false, 
                   );
                 }
@@ -81,7 +122,7 @@ class ProfileScreen extends StatelessWidget {
           child: Column(
             children: [
               const SizedBox(height: 10),
-              // 1. Header Profil
+              // 1. Header Profil (Sekarang Dinamis)
               _buildProfileHeader(),
               const SizedBox(height: 16),
 
@@ -126,21 +167,25 @@ class ProfileScreen extends StatelessWidget {
             ),
             child: const CircleAvatar(
               radius: 36,
-              backgroundImage: NetworkImage('https://i.pravatar.cc/150?img=5'), 
+              backgroundImage: NetworkImage('https://i.pravatar.cc/150?img=5'), // Avatar masih dummy, bisa diganti dinamis juga nantinya
             ),
           ),
           const SizedBox(width: 16),
           Expanded(
-            child: Column(
+            child: _isLoading 
+            ? const Center(child: CircularProgressIndicator()) 
+            : Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Text(
-                  'Rina Terapis',
-                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.black87),
+                Text(
+                  _therapistName, // <-- Data dinamis diterapkan di sini
+                  style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.black87),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
                 ),
                 const SizedBox(height: 4),
                 Text(
-                  'Terapis ID: TRP00128',
+                  'Terapis ID: $_therapistId', // <-- Data dinamis diterapkan di sini
                   style: TextStyle(fontSize: 13, color: Colors.grey.shade600),
                 ),
                 const SizedBox(height: 8),
@@ -152,7 +197,7 @@ class ProfileScreen extends StatelessWidget {
                       text: TextSpan(
                         children: [
                           const TextSpan(
-                            text: '4.9 ',
+                            text: '4.9 ', // Dummy rating
                             style: TextStyle(
                               fontSize: 13,
                               fontWeight: FontWeight.bold,
@@ -160,7 +205,7 @@ class ProfileScreen extends StatelessWidget {
                             ),
                           ),
                           TextSpan(
-                            text: '(128 review)',
+                            text: '(128 review)', // Dummy review count
                             style: TextStyle(
                               fontSize: 13,
                               color: Colors.grey.shade600,
@@ -196,17 +241,7 @@ class ProfileScreen extends StatelessWidget {
       ),
       child: Column(
         children: [
-          _buildInfoRow('Area Kerja', 'Bandung & Cimahi'),
-          Padding(
-            padding: const EdgeInsets.symmetric(vertical: 12),
-            child: Divider(color: Colors.grey.shade200, height: 1),
-          ),
-          _buildInfoRow('Pengalaman', '3 Tahun'),
-          Padding(
-            padding: const EdgeInsets.symmetric(vertical: 12),
-            child: Divider(color: Colors.grey.shade200, height: 1),
-          ),
-          _buildInfoRow('Spesialisasi', 'Mother Care, Baby Spa'),
+          _buildInfoRow('Area Kerja', 'Bandung & Cimahi'), // Bisa dibuat dinamis juga nantinya
         ],
       ),
     );
@@ -256,11 +291,19 @@ class ProfileScreen extends StatelessWidget {
         children: [
           const SizedBox(height: 8), 
           
-          _buildMenuItem(Icons.person_outline, 'Data Diri', () {}),
+          _buildMenuItem(Icons.person_outline, 'Data Diri', () {
+            Navigator.push(
+              context,
+              MaterialPageRoute(builder: (context) => const DataDiriScreen()),
+            );
+          }),
           _buildMenuDivider(),
-          _buildMenuItem(Icons.description_outlined, 'Dokumen', () {}),
-          _buildMenuDivider(),
-          _buildMenuItem(Icons.menu_book_outlined, 'SOP & Panduan', () {}),
+          
+          _buildMenuItem(Icons.menu_book_outlined, 'SOP & Panduan', () {
+             Navigator.push(
+              context,
+              MaterialPageRoute(builder: (context) => const SopPanduanScreen()),);
+          }),
           _buildMenuDivider(),
           
           _buildMenuItem(Icons.settings_outlined, 'Pengaturan', () {
@@ -269,21 +312,16 @@ class ProfileScreen extends StatelessWidget {
               MaterialPageRoute(builder: (context) => const SettingsScreen()),
             );
           }),
-          
-          _buildMenuDivider(),
-          _buildMenuItem(Icons.help_outline, 'Bantuan & Dukungan', () {}),
-          _buildMenuDivider(),
-          _buildMenuItem(Icons.info_outline, 'Tentang Aplikasi', () {}),
           _buildMenuDivider(),
           
-          // TOMBOL KELUAR DITAMBAHKAN DI SINI
+          // TOMBOL KELUAR
           _buildMenuItem(
             Icons.logout_outlined, 
             'Keluar', 
             () => _handleLogout(context),
-            textColor: Colors.red.shade700, // Warna merah peringatan
+            textColor: Colors.red.shade700,
             iconColor: Colors.red.shade700,
-            showTrailing: false, // Hilangkan panah kanan
+            showTrailing: false, 
           ),
           
           const SizedBox(height: 8), 
@@ -292,8 +330,6 @@ class ProfileScreen extends StatelessWidget {
     );
   }
 
-  // --- WIDGET BUILDERS ---
-  // PERBAIKAN: Parameter opsional ditambahkan agar warna teks dan ikon bisa diubah
   Widget _buildMenuItem(IconData icon, String title, VoidCallback onTap, {Color? textColor, Color? iconColor, bool showTrailing = true}) {
     return ListTile(
       contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 0),
@@ -301,7 +337,7 @@ class ProfileScreen extends StatelessWidget {
       leading: Icon(icon, color: iconColor ?? Colors.grey.shade700, size: 22),
       title: Text(
         title,
-        style: TextStyle( // Hapus kata 'const' di sini karena menggunakan variabel warna
+        style: TextStyle( 
           fontSize: 14,
           fontWeight: FontWeight.w600,
           color: textColor ?? Colors.black87,

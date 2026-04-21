@@ -1,196 +1,274 @@
-import 'package:dio/dio.dart';
+import 'dart:convert';
+import 'package:flutter/foundation.dart';
+import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:flutter/material.dart';
-import 'dart:convert'; // DITAMBAHKAN: Untuk memaksa parsing JSON dari String
 
 class ApiService {
-  static const String baseUrl = 'https://app.momnjo.com/dev/api_terapis';
-  
-  late Dio _dio;
+  static const String baseUrl = "https://app.momnjo.com/dev"; 
 
-  ApiService() {
-    _dio = Dio(BaseOptions(
-      baseUrl: baseUrl,
-      connectTimeout: const Duration(seconds: 10),
-      receiveTimeout: const Duration(seconds: 10),
-      headers: {
-        'Accept': 'application/json',
-        'ngrok-skip-browser-warning': 'true', 
-      },
-    ));
-
-    _dio.interceptors.add(InterceptorsWrapper(
-      onRequest: (options, handler) async {
-        final prefs = await SharedPreferences.getInstance();
-        final token = prefs.getString('token');
-        
-        if (token != null) {
-          options.headers['Authorization'] = 'Bearer $token';
-        }
-        
-        debugPrint('➡️ REQUEST [${options.method}] => PATH: ${options.path}');
-        return handler.next(options);
-      },
-      onResponse: (response, handler) {
-        debugPrint('✅ RESPONSE [${response.statusCode}] => PATH: ${response.requestOptions.path}');
-        return handler.next(response);
-      },
-      onError: (DioException e, handler) {
-        debugPrint('❌ API Error: ${e.response?.statusCode} - ${e.message}');
-        return handler.next(e);
-      },
-    ));
+  // --- HELPER: MENGAMBIL TOKEN JWT DARI LOKAL ---
+  Future<String?> _getToken() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getString('jwt_token');
   }
 
-  // =========================================================================
-  // 1. FUNGSI LOGIN (REAL API PHP)
-  // =========================================================================
-  Future<Map<String, dynamic>> login(String username, String password) async {
-    try {
-      final response = await _dio.post('/login.php', data: {
-        'username': username.trim(),
-        'password': password,
-      });
+  // --- 1. MENGAMBIL DAFTAR SEMUA PEKERJAAN (GET ALL JOBS) ---
+  Future<Map<String, dynamic>> getJobs({String? status, String? search}) async {
+    final String? token = await _getToken();
+    if (token == null) return {'success': false, 'message': 'Unauthorized. Token tidak ditemukan.'};
 
-      // LAPISAN PELINDUNG: Konversi paksa (Safety Net)
-      // Jika PHP mengembalikan String (akibat lupa set Header JSON), kita paksa parse.
-      dynamic responseData = response.data;
-      if (responseData is String) {
-        try {
-          responseData = jsonDecode(responseData);
-        } catch (_) {
-          // Jika gagal parse, berarti PHP benar-benar mengembalikan teks acak / HTML error.
-        }
-      }
+    String urlString = '$baseUrl/api_terapis/get_all_jobs.php';
+    List<String> queryParams = [];
+    
+    if (status != null && status.isNotEmpty) {
+      queryParams.add('status=$status');
+    }
+    if (search != null && search.isNotEmpty) {
+      queryParams.add('search=$search');
+    }
+    
+    if (queryParams.isNotEmpty) {
+      urlString += '?${queryParams.join('&')}';
+    }
+
+    try {
+      final response = await http.get(
+        Uri.parse(urlString),
+        headers: {
+          'Content-Type': 'application/json', 
+          'Accept': 'application/json',
+          'Authorization': 'Bearer $token'
+        },
+      );
 
       if (response.statusCode == 200) {
-        if (responseData is Map) {
-          // Respons adalah Map JSON yang sah
-          if (responseData['success'] == true) {
-            final prefs = await SharedPreferences.getInstance();
-            
-            // Gunakan nullable operator (?) untuk menghindari null exception
-            final token = responseData['data']?['token'];
-            final namaLengkap = responseData['data']?['nama_lengkap'];
-
-            if (token != null) await prefs.setString('token', token);
-            if (namaLengkap != null) await prefs.setString('nama_lengkap', namaLengkap);
-
-            // Kita harus pastikan tipe yang dikembalikan adalah Map<String, dynamic>
-            return Map<String, dynamic>.from(responseData);
-          } else {
-             // Berhasil di-parse, tetapi backend menyatakan success: false
-             return {
-               'success': false, 
-               'message': responseData['message'] ?? 'Login Gagal. Kredensial tidak valid.'
-             };
-          }
-        } else {
-           // Respons 200 OK, tapi isinya bukan Map JSON (misal: "Database connection failed")
-           // Kita tidak bisa menggunakan responseData['message'], karena ini String.
-           return {
-             'success': false, 
-             'message': 'Format respons server tidak dikenali: \n$responseData'
-           };
+        try {
+          return json.decode(response.body);
+        } catch (e) {
+          return {'success': false, 'message': 'Format response server tidak valid.'};
         }
+      } else if (response.statusCode == 401) {
+        await logout(); 
+        return {'success': false, 'message': 'Unauthorized. Token tidak valid.'};
+      } else {
+        return {'success': false, 'message': 'Gagal mengambil data (Status: ${response.statusCode})'};
+      }
+    } catch (e) {
+      return {'success': false, 'message': 'Terjadi kesalahan jaringan: $e'};
+    }
+  }
+
+  // --- 2. MENGAMBIL STATISTIK TERAPIS (HOME SCREEN) ---
+  Future<Map<String, dynamic>> getStats() async {
+    final String? token = await _getToken();
+    if (token == null) return {'success': false, 'message': 'Token tidak ditemukan'};
+
+    try {
+      final response = await http.get(
+        Uri.parse('$baseUrl/api_terapis/get_stats.php'),
+        headers: {
+          'Content-Type': 'application/json', 
+          'Accept': 'application/json',
+          'Authorization': 'Bearer $token'
+        },
+      );
+      if (response.statusCode == 200) return json.decode(response.body);
+      return {'success': false, 'message': 'Gagal memuat statistik'};
+    } catch (e) {
+      return {'success': false, 'message': 'Terjadi kesalahan jaringan'};
+    }
+  }
+
+  // --- 3. MENYELESAIKAN STATUS TREATMENT PER-ITEM ---
+  Future<Map<String, dynamic>> updateJobStatus(String idTransaksi, String productName) async {
+    final String? token = await _getToken();
+    if (token == null) return {'status': 'error', 'message': 'Token tidak ditemukan'};
+
+    try {
+      final response = await http.post(
+        Uri.parse('$baseUrl/api_terapis/update_job_status.php'),
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json',
+          'Authorization': 'Bearer $token',
+        },
+        body: json.encode({
+          'id_transaksi': idTransaksi,
+          'product_name': productName,
+        }),
+      );
+
+      if (response.statusCode == 200 || response.statusCode == 400 || response.statusCode == 401 || response.statusCode == 404) {
+        try {
+          return json.decode(response.body);
+        } catch (e) {
+          String partialError = response.body;
+          if (partialError.length > 100) partialError = '${partialError.substring(0, 100)}...';
+          return {'status': 'error', 'message': 'Server mengembalikan error PHP: $partialError'};
+        }
+      } else {
+        return {'status': 'error', 'message': 'Server Error (Status: ${response.statusCode})'};
+      }
+    } catch (e) {
+      return {'status': 'error', 'message': 'Koneksi terputus: $e'};
+    }
+  }
+
+  // --- 4. MENYIMPAN DATA MEDIS ---
+  Future<Map<String, dynamic>> storeDataMedis({
+    required String idTransaksi,
+    required String idCustomer,
+    String? suhu,
+    String? tinggi,
+    String? berat,
+    String? tekanan,
+    String? sistolik, // Menambahkan parameter sistolik dari UI
+    String? diastolik, // Menambahkan parameter diastolik dari UI
+    String? catatan,
+  }) async {
+    final String? token = await _getToken();
+    if (token == null) return {'status': 'error', 'message': 'Token tidak ditemukan'};
+
+    // CEGAH ERROR 500 KARENA ID KOSONG
+    if (idTransaksi.trim().isEmpty || idCustomer.trim().isEmpty) {
+      return {'status': 'error', 'message': 'ID Transaksi atau ID Customer tidak terbaca. Harap kembali dan buka ulang halaman ini.'};
+    }
+
+    // GABUNGKAN SISTOLIK DAN DIASTOLIK (Contoh: "120/80") JIKA TEKANAN KOSONG
+    String finalTekanan = tekanan ?? '';
+    if (finalTekanan.isEmpty && sistolik != null && diastolik != null) {
+      if (sistolik.isNotEmpty && diastolik.isNotEmpty) {
+        finalTekanan = '$sistolik/$diastolik';
+      }
+    }
+
+    try {
+      final Map<String, dynamic> payloadData = {
+        'id_transaksi': idTransaksi,
+        'id_customer': idCustomer,
+        if (suhu != null && suhu.isNotEmpty) 'suhu': suhu,
+        if (tinggi != null && tinggi.isNotEmpty) 'tinggi': tinggi,
+        if (berat != null && berat.isNotEmpty) 'berat': berat,
+        if (finalTekanan.isNotEmpty) 'tekanan': finalTekanan,
+        if (sistolik != null && sistolik.isNotEmpty) 'sistolik': sistolik, // Jaga-jaga jika backend minta terpisah
+        if (diastolik != null && diastolik.isNotEmpty) 'diastolik': diastolik, // Jaga-jaga jika backend minta terpisah
+        if (catatan != null && catatan.isNotEmpty) 'catatan': catatan,
+      };
+
+      // PRINT INI AKAN MUNCUL DI TERMINAL/DEBUG CONSOLE ANDA
+      debugPrint("==== DEBUG PAYLOAD API STORE DATA MEDIS ====");
+      debugPrint(jsonEncode(payloadData));
+      debugPrint("==============================================");
+
+      final response = await http.post(
+        Uri.parse('$baseUrl/api_terapis/store_data_medis.php'),
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json',
+          'Authorization': 'Bearer $token',
+        },
+        body: json.encode(payloadData),
+      );
+
+      if (response.statusCode == 201 || response.statusCode == 200 || response.statusCode == 400 || response.statusCode == 401) {
+        try {
+          return json.decode(response.body);
+        } catch (e) {
+          String partialError = response.body;
+          if (partialError.length > 100) partialError = '${partialError.substring(0, 100)}...';
+          return {'status': 'error', 'message': 'Server error: $partialError'};
+        }
+      } else {
+        return {'status': 'error', 'message': 'Server Error (Status: ${response.statusCode})'};
+      }
+    } catch (e) {
+      return {'status': 'error', 'message': 'Koneksi terputus: $e'};
+    }
+  }
+
+  // --- 5. MENGAMBIL DATA MEDIS ---
+  Future<Map<String, dynamic>> getStoredDataMedis({String? idTransaksi}) async {
+    final String? token = await _getToken();
+    if (token == null) return {'status': 'error', 'message': 'Unauthorized. Token tidak ditemukan.'};
+
+    String urlString = '$baseUrl/api_terapis/get_stored_data_medis.php';
+    if (idTransaksi != null && idTransaksi.isNotEmpty) {
+      urlString += '?id_transaksi=$idTransaksi';
+    }
+
+    try {
+      final response = await http.get(
+        Uri.parse(urlString),
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json',
+          'Authorization': 'Bearer $token',
+        },
+      );
+
+      if (response.statusCode == 200) {
+        try {
+          return json.decode(response.body);
+        } catch (e) {
+          return {'status': 'error', 'message': 'Format response server tidak valid.'};
+        }
+      } else if (response.statusCode == 401) {
+        await logout();
+        return {'status': 'error', 'message': 'Unauthorized. Token tidak valid atau kadaluarsa.'};
+      } else {
+        return {'status': 'error', 'message': 'Gagal mengambil data (Status: ${response.statusCode})'};
+      }
+    } catch (e) {
+      return {'status': 'error', 'message': 'Terjadi kesalahan jaringan: $e'};
+    }
+  }
+
+  // --- 6. LOGIN ---
+  Future<Map<String, dynamic>> login(String username, String password) async {
+    try {
+      final response = await http.post(
+        Uri.parse('$baseUrl/api_terapis/login.php'),
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json',
+        },
+        body: json.encode({
+          'username': username.trim(), 
+          'password': password.trim()
+        }),
+      );
+      
+      if (response.statusCode == 200 || response.statusCode == 400 || response.statusCode == 401) {
+        final responseData = json.decode(response.body);
+        
+        if (responseData['success'] == true && responseData['data'] != null) {
+          final prefs = await SharedPreferences.getInstance();
+          final data = responseData['data'];
+          
+          if (data['token'] != null) await prefs.setString('jwt_token', data['token']);
+          if (data['nama_lengkap'] != null) await prefs.setString('nama_lengkap', data['nama_lengkap']);
+          if (data['foto'] != null) await prefs.setString('foto', data['foto']);
+          if (data['email'] != null) await prefs.setString('email', data['email']);
+          if (data['username'] != null) await prefs.setString('username', data['username']);
+          if (data['id_pegawai'] != null) await prefs.setInt('id_pegawai', data['id_pegawai']);
+        }
+        return responseData;
       }
       return {'success': false, 'message': 'Gagal terhubung ke server.'};
-      
-    } on DioException catch (e) {
-      return _handleDioError(e);
     } catch (e) {
-      return {'success': false, 'message': 'Terjadi kesalahan sistem (Parse Error): $e'};
+      return {'success': false, 'message': 'Terjadi kesalahan jaringan atau sistem.'};
     }
   }
 
-  // =========================================================================
-  // 2. FUNGSI LOGOUT (REAL API PHP)
-  // =========================================================================
-  Future<bool> logout() async {
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.remove('token');
-      await prefs.remove('nama_lengkap');
-      return true;
-    } catch (e) {
-      debugPrint("Error saat logout: $e");
-      return false;
-    }
-  }
-
-  // =========================================================================
-  // 3. FUNGSI AMBIL STATISTIK HARIAN (REAL API PHP)
-  // =========================================================================
-  Future<Map<String, dynamic>> getStats() async {
-    try {
-      final response = await _dio.get('/stats.php');
-      
-      dynamic responseData = response.data;
-      if (responseData is String) {
-        try { responseData = jsonDecode(responseData); } catch (_) {}
-      }
-      
-      if (response.statusCode == 200 && responseData is Map) {
-        return Map<String, dynamic>.from(responseData);
-      }
-      return {'success': false, 'message': 'Gagal mengambil data statistik'};
-      
-    } on DioException catch (e) {
-      return _handleDioError(e);
-    }
-  }
-
-  // =========================================================================
-  // 4. FUNGSI AMBIL DAFTAR PEKERJAAN (REAL API PHP)
-  // =========================================================================
-  Future<Map<String, dynamic>> getJobs({String status = 'Open'}) async {
-    try {
-      final response = await _dio.get('/get_jobs.php', queryParameters: {
-        'status': status,
-      });
-
-      dynamic responseData = response.data;
-      if (responseData is String) {
-        try { responseData = jsonDecode(responseData); } catch (_) {}
-      }
-
-      if (response.statusCode == 200 && responseData is Map) {
-        return Map<String, dynamic>.from(responseData);
-      }
-      return {'success': false, 'message': 'Gagal mengambil daftar pekerjaan'};
-      
-    } on DioException catch (e) {
-      return _handleDioError(e);
-    }
-  }
-
-  // =========================================================================
-  // FUNGSI BANTUAN UNTUK MENANGANI ERROR API SECARA ELEGAN
-  // =========================================================================
-  Map<String, dynamic> _handleDioError(DioException e) {
-    String errorMessage = 'Terjadi kesalahan jaringan.';
-    
-    if (e.type == DioExceptionType.connectionTimeout || e.type == DioExceptionType.receiveTimeout) {
-      errorMessage = 'Koneksi ke server terputus (Timeout).';
-    } else if (e.response != null) {
-      // Sama seperti di atas, amankan parse error message
-      dynamic errorData = e.response?.data;
-      if (errorData is String) {
-        try { errorData = jsonDecode(errorData); } catch (_) {}
-      }
-      
-      if (errorData is Map && errorData['message'] != null) {
-        errorMessage = errorData['message'];
-      } else {
-        errorMessage = 'Server merespons dengan kode: ${e.response?.statusCode}';
-      }
-    } else if (e.type == DioExceptionType.connectionError) {
-      errorMessage = 'Tidak ada koneksi internet / Server tidak dapat dijangkau.';
-    }
-
-    return {
-      'success': false,
-      'message': errorMessage,
-    };
+  // --- 7. LOGOUT ---
+  Future<void> logout() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove('jwt_token');
+    await prefs.remove('nama_lengkap');
+    await prefs.remove('foto');
+    await prefs.remove('email');
+    await prefs.remove('username');
+    await prefs.remove('id_pegawai');
+    await prefs.remove('is_on_duty');
   }
 }
