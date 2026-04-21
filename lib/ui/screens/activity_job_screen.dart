@@ -48,11 +48,9 @@ class _ActivityScreenState extends State<ActivityScreen> {
 
     try {
       final api = ApiService();
-      // PERBAIKAN: Menggunakan getHistoryJobs() yang sudah disiapkan di ApiService terbaru,
-      // karena getJobs() kini khusus untuk Active Jobs (Open) tanpa parameter.
-      final response = await api.getJobs(status: 'closed');
+      final response = await api.getHistoryList();
 
-      if (response['success'] == true) {
+      if (response['status'] == 'success' || response['success'] == true) {
         if (mounted) {
           setState(() {
             _apiActivities = response['data'] ?? [];
@@ -84,16 +82,13 @@ class _ActivityScreenState extends State<ActivityScreen> {
       final now = DateTime.now();
       final today = DateTime(now.year, now.month, now.day);
       
-      // Batas awal minggu (Senin)
       final startOfWeek = today.subtract(Duration(days: today.weekday - 1));
-      // Batas awal bulan
       final startOfMonth = DateTime(today.year, today.month, 1);
 
       _filteredActivities = _apiActivities.where((activity) {
-        // 1. FILTER BERDASARKAN CHIPS
         bool matchesTab = true;
         
-        final rawDate = activity['start_time']?.toString();
+        final rawDate = activity['date']?.toString() ?? activity['start_time']?.toString();
         DateTime? jobDate;
         if (rawDate != null && rawDate.isNotEmpty) {
           try {
@@ -116,32 +111,31 @@ class _ActivityScreenState extends State<ActivityScreen> {
           matchesTab = !hasRating;
         }
 
-        // 2. FILTER PENCARIAN TEXT
         final query = _searchController.text.toLowerCase();
         final name = (activity['customer_name'] ?? '').toString().toLowerCase();
-        final treatment = (activity['treatment_summary'] ?? '').toString().toLowerCase();
-        bool matchesSearch = query.isEmpty || name.contains(query) || treatment.contains(query);
+        final treatment = (activity['treatment_name'] ?? activity['treatment_summary'] ?? '').toString().toLowerCase();
+        // Nambahin pencarian ID Booking juga biar sakti
+        final idBooking = (activity['id_transaksi'] ?? activity['id_booking'] ?? '').toString().toLowerCase();
+        
+        bool matchesSearch = query.isEmpty || name.contains(query) || treatment.contains(query) || idBooking.contains(query);
 
         return matchesTab && matchesSearch;
       }).toList();
+      
+      _filteredActivities.sort((a, b) {
+         String dateA = a['date']?.toString() ?? a['start_time']?.toString() ?? '2000-01-01';
+         String dateB = b['date']?.toString() ?? b['start_time']?.toString() ?? '2000-01-01';
+         return dateB.compareTo(dateA);
+      });
     });
   }
 
-  // --- FORMATTER WAKTU ---
   String _formatDate(String? raw) {
     if (raw == null || raw.isEmpty) return '-';
     try {
       DateTime dt = DateTime.parse(raw);
       return DateFormat('dd MMMM yyyy').format(dt);
     } catch (e) { return raw; }
-  }
-
-  String _formatTimeOnly(String? raw) {
-    if (raw == null || raw.isEmpty) return '--:--';
-    try {
-      DateTime dt = DateTime.parse(raw);
-      return DateFormat('HH:mm').format(dt);
-    } catch (e) { return '--:--'; }
   }
 
   @override
@@ -190,7 +184,7 @@ class _ActivityScreenState extends State<ActivityScreen> {
                   controller: _searchController,
                   onChanged: (value) => _applyFilters(),
                   decoration: InputDecoration(
-                    hintText: 'Cari customer atau treatment',
+                    hintText: 'Cari customer, treatment, atau ID',
                     hintStyle: TextStyle(color: Colors.grey.shade400, fontSize: 14),
                     prefixIcon: Icon(Icons.search, color: Colors.grey.shade400),
                     suffixIcon: _searchController.text.isNotEmpty 
@@ -209,7 +203,7 @@ class _ActivityScreenState extends State<ActivityScreen> {
               ),
             ),
 
-            // 2. FILTER CHIPS (Horizontal Scroll)
+            // 2. FILTER CHIPS
             SingleChildScrollView(
               scrollDirection: Axis.horizontal,
               padding: const EdgeInsets.symmetric(horizontal: 20),
@@ -333,26 +327,24 @@ class _ActivityScreenState extends State<ActivityScreen> {
   }
 
   Widget _buildActivityCard(Map<dynamic, dynamic> data) {
-    // Mapping keys dari API 
-    final String customerName = data['customer_name']?.toString() ?? 'Klien Tanpa Nama';
-    final String treatmentName = data['treatment_summary']?.toString() ?? 'Treatment';
+    // AMBIL ID BOOKING / TRANSAKSI
+    final String idBooking = data['id_transaksi']?.toString() ?? data['id_booking']?.toString() ?? '-';
     
-    // Mengecek Room Type (Home Service atau Onsite)
-    final bool isHomeService = data['room_type']?.toString().toLowerCase().contains('home') ?? false;
+    final String customerName = data['customer_name']?.toString() ?? 'Klien Tanpa Nama';
+    final String treatmentName = data['treatment_name']?.toString() ?? data['treatment_summary']?.toString() ?? 'Treatment';
+    
+    final String serviceType = data['service_type']?.toString() ?? data['room_type']?.toString() ?? 'Onsite';
+    final bool isHomeService = serviceType.toLowerCase().contains('home');
     final String typeText = isHomeService ? 'Home Service' : 'Onsite';
 
-    final String dateText = _formatDate(data['start_time']?.toString());
-    final String startTime = _formatTimeOnly(data['start_time']?.toString());
-    
-    // API lama mungkin belum punya end_time, kita fallback ke '-' jika kosong
-    final String endTime = data['end_time'] != null ? _formatTimeOnly(data['end_time'].toString()) : '-';
-    final String duration = data['durasi_aktual']?.toString() ?? data['duration']?.toString() ?? '-';
+    final String dateText = _formatDate(data['date']?.toString() ?? data['start_time']?.toString());
+    final String startTime = data['time']?.toString() ?? '--:--';
     
     final String status = data['status']?.toString() ?? 'Completed';
-    final String? rating = data['rating']?.toString();
+    final String qty = data['qty']?.toString() ?? '1';
 
-    // Opsional: Gambar Avatar pelanggan jika ada dari API
-    final String avatarUrl = data['avatar'] ?? data['foto'] ?? 'https://i.pravatar.cc/150?img=43';
+    final String avatarUrl = data['customer_avatar'] ?? data['avatar'] ?? data['foto'] ?? 'https://i.pravatar.cc/150?img=43';
+    final String? rating = data['rating']?.toString();
 
     return Container(
       padding: const EdgeInsets.all(16),
@@ -364,7 +356,6 @@ class _ActivityScreenState extends State<ActivityScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // HEADER: Avatar & Nama Customer
           Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -378,6 +369,12 @@ class _ActivityScreenState extends State<ActivityScreen> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
+                    // 🔥 INI DIA TAMBAHAN ID BOOKING-NYA TUAN!
+                    Text(
+                      'ID: $idBooking',
+                      style: TextStyle(fontSize: 11, fontWeight: FontWeight.w800, color: primaryPeach),
+                    ),
+                    const SizedBox(height: 2),
                     Text(
                       customerName,
                       style: TextStyle(fontSize: 16, fontWeight: FontWeight.w900, color: textDarkBrown),
@@ -392,7 +389,6 @@ class _ActivityScreenState extends State<ActivityScreen> {
                       overflow: TextOverflow.ellipsis,
                     ),
                     const SizedBox(height: 8),
-                    // Badge Home Visit / At Branch
                     Container(
                       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                       decoration: BoxDecoration(
@@ -408,7 +404,6 @@ class _ActivityScreenState extends State<ActivityScreen> {
                 ),
               ),
               
-              // STATUS & RATING (Sebelah Kanan)
               Column(
                 crossAxisAlignment: CrossAxisAlignment.end,
                 children: [
@@ -444,7 +439,6 @@ class _ActivityScreenState extends State<ActivityScreen> {
           Divider(color: Colors.grey.shade200, height: 1),
           const SizedBox(height: 16),
           
-          // TANGGAL & WAKTU
           Text(
             dateText,
             style: TextStyle(fontSize: 13, color: textDarkBrown.withOpacity(0.8), fontWeight: FontWeight.w600),
@@ -455,14 +449,14 @@ class _ActivityScreenState extends State<ActivityScreen> {
               Icon(Icons.schedule, size: 14, color: textDarkBrown.withOpacity(0.6)),
               const SizedBox(width: 6),
               Text(
-                endTime == '-' ? startTime : '$startTime ➔ $endTime',
+                'Mulai: $startTime',
                 style: TextStyle(fontSize: 12, color: textDarkBrown.withOpacity(0.8), fontWeight: FontWeight.w600),
               ),
               const SizedBox(width: 16),
-              Icon(Icons.hourglass_bottom, size: 14, color: textDarkBrown.withOpacity(0.6)),
+              Icon(Icons.shopping_bag_outlined, size: 14, color: textDarkBrown.withOpacity(0.6)),
               const SizedBox(width: 6),
               Text(
-                duration != '-' ? '$duration mnt' : '-',
+                'Qty: $qty',
                 style: TextStyle(fontSize: 12, color: textDarkBrown.withOpacity(0.8), fontWeight: FontWeight.w600),
               ),
             ],
@@ -471,10 +465,8 @@ class _ActivityScreenState extends State<ActivityScreen> {
           const SizedBox(height: 16),
           Divider(color: Colors.grey.shade200, height: 1),
           
-          // TOMBOL LIHAT DETAIL
           InkWell(
             onTap: () {
-              // Melempar data aktual ke activity_detail (jika sudah Anda buat nantinya)
               final Map<String, dynamic> safeData = Map<String, dynamic>.from(data);
               Navigator.pushNamed(context, '/activity_detail', arguments: safeData);
             },
@@ -484,7 +476,7 @@ class _ActivityScreenState extends State<ActivityScreen> {
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
                   Text(
-                    'Lihat Detail',
+                    'Lihat Detail Rating & Laporan',
                     style: TextStyle(fontSize: 13, fontWeight: FontWeight.w800, color: textDarkBrown),
                   ),
                   Icon(Icons.chevron_right, color: textDarkBrown, size: 20),

@@ -45,9 +45,9 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
     try {
       final api = ApiService();
       
-      // CATATAN: Pastikan fungsi getJobs() di ApiService Anda sudah mengarah 
-      // ke endpoint: /api_terapis/get_active_jobs.php atau get_all_jobs.php?status=open
-      final response = await api.getJobs(); 
+      // ✅ UPDATE: Sekarang langsung pakai getActiveJobs() dari ApiService yang baru
+      // Ini otomatis nembak ke get_all_jobs.php?status=open
+      final response = await api.getActiveJobs(); 
 
       if (response['success'] == true) {
         if (mounted) {
@@ -79,10 +79,26 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
   void _applyFilters() {
     setState(() {
       _filteredSchedules = _apiSchedules.where((schedule) {
-        // 1. FILTER STATUS (Sembunyikan job yang sudah close/closed/completed)
+        
+        // 1. FILTER STATUS UTAMA (Galakin Filternya)
         final String status = (schedule['status'] ?? schedule['booking_status'] ?? '').toString().toLowerCase().trim();
-        if (['close', 'closed', 'completed'].contains(status)) {
-          return false; // Jangan masukkan ke dalam list jika statusnya sudah selesai
+        // Kalau statusnya emang udah ditandai selesai dari backend, buang dari list!
+        if (['close', 'closed', 'completed', 'selesai'].contains(status)) {
+          return false; 
+        }
+
+        // 1B. FILTER TAMBAHAN (Cek isi layanannya)
+        // Kalau status booking-nya masih "Open" TAPI ternyata semua layanannya udah is_done: true, buang juga!
+        final List<dynamic> treatments = schedule['treatments'] ?? [];
+        if (treatments.isNotEmpty) {
+          // Ngecek apakah SEMUA layanan di dalam array ini sudah is_done == true
+          bool isAllTreatmentsDone = treatments.every((item) {
+            return item is Map && item['is_done'] == true;
+          });
+          
+          if (isAllTreatmentsDone) {
+            return false; // Jangan ditampilin kalau udah kelar semua layanannya
+          }
         }
 
         // 2. FILTER TIPE LAYANAN (Home Service vs Onsite)
@@ -95,16 +111,14 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
         final idBook = (schedule['id_booking'] ?? '').toString().toLowerCase();
         bool matchesSearch = query.isEmpty || name.contains(query) || idBook.contains(query);
 
-        // Gabungkan hasil filter kategori dan pencarian
         return matchesTab && matchesSearch;
       }).toList();
 
-      // 4. SORTING: URUTKAN BERDASARKAN WAKTU TERBARU DI ATAS (Descending)
+      // 4. SORTING: URUTKAN BERDASARKAN WAKTU TERBARU DI ATAS
       _filteredSchedules.sort((a, b) {
         DateTime timeA = DateTime.tryParse(a['start_time']?.toString() ?? '') ?? DateTime(2000);
         DateTime timeB = DateTime.tryParse(b['start_time']?.toString() ?? '') ?? DateTime(2000);
-        
-        return timeB.compareTo(timeA); // Membandingkan B terhadap A (Terbaru ke Terlama)
+        return timeB.compareTo(timeA); 
       });
     });
   }
@@ -142,7 +156,7 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
           centerTitle: true,
         ),
         body: RefreshIndicator(
-          onRefresh: _fetchSchedulesFromApi, // Pull-to-refresh sesuai anjuran backend
+          onRefresh: _fetchSchedulesFromApi, // Pull-to-refresh
           color: primaryPink,
           child: Column(
             children: [
@@ -339,24 +353,19 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
   }
 
   Widget _buildScheduleCard(Map<dynamic, dynamic> schedule) {
-    // Sesuai dengan field di JSON backend
     bool isHomeService = schedule['room_type']?.toString().toLowerCase().contains('home') ?? false;
     final String formattedTime = _formatTime(schedule['start_time']?.toString());
     
-    // Tarik ID Booking & Customer Name
     final String idBooking = schedule['id_booking']?.toString() ?? '';
     final String customerName = schedule['customer_name']?.toString() ?? 'Klien Tanpa Nama';
     
-    // Tampilkan ID Booking jika ada, jika kosong fallback ke nama klien
     final String displayTitle = (idBooking.isNotEmpty && idBooking != '-') ? idBooking : customerName;
     
-    // Alamat / Lokasi (Menggunakan Gerai atau Alamat fallback)
     final String roomType = schedule['room_type']?.toString() ?? '';
     final String gerai = schedule['gerai']?.toString() ?? '';
     
     String rawAlamat = [gerai, roomType].where((e) => e.isNotEmpty).join(' - ');
     if (rawAlamat.isEmpty) {
-      // Fallback jaga-jaga kalau ada field alamat (meski tidak ada di sample response)
       rawAlamat = schedule['alamat']?.toString() ?? 'Menunggu konfirmasi lokasi';
     }
 
@@ -364,9 +373,12 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
       onTap: () {
         final Map<String, dynamic> safeSchedule = Map<String, dynamic>.from(schedule);
         
-        // Begitu kita KEMBALI dari layar Detail Booking, otomatis _fetchSchedulesFromApi dipanggil.
-        // Karena statusnya di backend sudah bukan 'Open', maka data tersebut otomatis tidak dirender.
-        Navigator.pushNamed(context, '/booking_detail', arguments: safeSchedule).then((_) {
+        bool isHomeService = schedule['room_type']?.toString().toLowerCase().contains('home') ?? false;
+
+        // ✅ Arahin sesuai Tab
+        String targetRoute = isHomeService ? '/booking_detail' : '/booking_detail_onsite';
+
+        Navigator.pushNamed(context, targetRoute, arguments: safeSchedule).then((_) {
           _fetchSchedulesFromApi();
         });
       },
@@ -399,13 +411,12 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    displayTitle, // ID Booking atau Nama Klien
+                    displayTitle, 
                     style: TextStyle(fontSize: 16, fontWeight: FontWeight.w900, color: textDarkBrown),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                   ),
                   
-                  // Hanya munculkan nama klien di bawah ID Booking jika datanya berbeda dengan ID
                   if (customerName.isNotEmpty && displayTitle != customerName) ...[
                     const SizedBox(height: 4),
                     Text(
@@ -418,7 +429,6 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
 
                   const SizedBox(height: 4),
                   
-                  // Menggunakan treatment_summary dari API secara langsung
                   Text(
                     schedule['treatment_summary']?.toString() ?? 'Detail treatment tidak tersedia',
                     style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: primaryPink),

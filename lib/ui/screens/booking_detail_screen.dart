@@ -21,8 +21,6 @@ class _BookingDetailScreenState extends State<BookingDetailScreen> {
   
   String? _arrivalPhotoPath; 
 
-  final Map<String, String> _treatmentStatusMap = {};
-
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
@@ -30,7 +28,7 @@ class _BookingDetailScreenState extends State<BookingDetailScreen> {
       final args = ModalRoute.of(context)?.settings.arguments as Map<String, dynamic>?;
       if (args != null) {
         _data = args;
-        String passedStatus = args['booking_status'] ?? args['status'] ?? 'Accepted';
+        String passedStatus = args['booking_status'] ?? args['status'] ?? 'Open';
         passedStatus = passedStatus.trim(); 
         
         if (['new', 'open', 'menunggu', 'pending'].contains(passedStatus.toLowerCase())) {
@@ -54,6 +52,7 @@ class _BookingDetailScreenState extends State<BookingDetailScreen> {
     }
   }
 
+  // --- FUNGSI UPDATE STATUS KE BACKEND ---
   Future<void> _updateStatusAPI(String newStatus) async {
     final String bookingId = _data?['id_booking']?.toString() ?? '';
     if (bookingId.isEmpty) {
@@ -64,18 +63,37 @@ class _BookingDetailScreenState extends State<BookingDetailScreen> {
     }
 
     setState(() { _isUpdatingStatus = true; });
-    await Future.delayed(const Duration(milliseconds: 500)); 
     
+    // Panggil API (Pastikan fungsi updateBookingStatus sudah ada di api_service.dart)
+    final api = ApiService();
+    final response = await api.updateBookingStatus(
+      idBooking: bookingId, 
+      newStatus: newStatus,
+      imagePath: _arrivalPhotoPath // Opsional: kirim path foto jika ada
+    );
+
     if (mounted) {
-      setState(() {
-        _isUpdatingStatus = false;
-        _currentStatus = newStatus;
-        _data?['booking_status'] = newStatus; 
-      });
+      setState(() { _isUpdatingStatus = false; });
+      if (response['success'] == true || response['status'] == 'success') {
+        setState(() {
+          _currentStatus = newStatus;
+          _data?['booking_status'] = newStatus; 
+        });
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(response['message'] ?? 'Gagal update status server')),
+        );
+        // Tetap paksa update lokal buat testing kalau API belum siap (Hapus nanti kalau prod)
+        setState(() {
+          _currentStatus = newStatus;
+          _data?['booking_status'] = newStatus; 
+        });
+      }
     }
   }
 
   Future<void> _pickImage(StateSetter setDialogState) async {
+    // TODO: Ganti dengan ImagePicker beneran nanti
     await Future.delayed(const Duration(milliseconds: 500));
     setDialogState(() {
       _arrivalPhotoPath = "captured_image_simulated.png"; 
@@ -96,7 +114,7 @@ class _BookingDetailScreenState extends State<BookingDetailScreen> {
               content: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  const Text('Silakan upload foto bukti kedatangan.', style: TextStyle(fontSize: 13, color: Colors.black54)),
+                  const Text('Silakan upload foto bukti kedatangan di lokasi (Home Service).', style: TextStyle(fontSize: 13, color: Colors.black54)),
                   const SizedBox(height: 20),
                   GestureDetector(
                     onTap: () => _pickImage(setDialogState),
@@ -175,7 +193,7 @@ class _BookingDetailScreenState extends State<BookingDetailScreen> {
       backgroundColor: const Color(0xFFFAFAFA),
       appBar: AppBar(
         leading: IconButton(icon: const Icon(Icons.arrow_back, color: Colors.black87), onPressed: () => Navigator.pop(context)),
-        title: const Text('Detail Booking', style: TextStyle(color: Colors.black87, fontWeight: FontWeight.bold)),
+        title: const Text('Detail Home Service', style: TextStyle(color: Colors.black87, fontWeight: FontWeight.bold)),
         centerTitle: true,
         backgroundColor: Colors.white,
         elevation: 0.5,
@@ -212,6 +230,7 @@ class _BookingDetailScreenState extends State<BookingDetailScreen> {
     );
   }
 
+  // --- WIDGET BUILDERS (Sama seperti sebelumnya) ---
   Widget _buildProfileCard(String nama, String telepon, String status) {
     Color statusBg;
     switch (status.toLowerCase()) {
@@ -391,10 +410,10 @@ class _BookingDetailScreenState extends State<BookingDetailScreen> {
       decoration: const BoxDecoration(color: Colors.white, boxShadow: [BoxShadow(color: Colors.black12, blurRadius: 10, offset: Offset(0, -2))]),
       child: SafeArea(
         child: ElevatedButton(
-          onPressed: onPressed,
+          onPressed: _isUpdatingStatus ? null : onPressed,
           style: ElevatedButton.styleFrom(backgroundColor: primaryPink, minimumSize: const Size(double.infinity, 54), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16))),
           child: _isUpdatingStatus 
-              ? const SizedBox(width: 24, height: 24, child: CircularProgressIndicator(color: Colors.white))
+              ? const SizedBox(width: 24, height: 24, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
               : Text(label, style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.white)),
         ),
       ),
@@ -406,6 +425,7 @@ class _BookingDetailScreenState extends State<BookingDetailScreen> {
 
     if (s == 'arrived') {
       return _buildSingleActionButton('PEMERIKSAAN KLIEN', () async {
+        // Melempar ID Customer sesuai dokumen API ke PemeriksaanScreen
         await Navigator.push(context, MaterialPageRoute(builder: (context) => PemeriksaanScreen(bookingData: _data)));
         await _updateStatusAPI('Pemeriksaan'); 
       });
@@ -421,16 +441,18 @@ class _BookingDetailScreenState extends State<BookingDetailScreen> {
     if (s == 'started') {
       return _buildSingleActionButton('SELESAIKAN KUNJUNGAN', () async {
         await _updateStatusAPI('Closed');
+        // Langsung masuk ke Layanan Laporan Kunjungan (rate_customer.php)
         if (mounted) Navigator.pushReplacementNamed(context, '/visit_report', arguments: _data);
       });
     }
 
     if (s == 'completed' || s == 'closed') {
-      return _buildSingleActionButton('LIHAT VISIT REPORT', () {
+      return _buildSingleActionButton('BUAT LAPORAN KUNJUNGAN', () {
         Navigator.pushReplacementNamed(context, '/visit_report', arguments: _data);
       });
     }
 
+    // Default: Status Accepted / Open
     return Container(
       padding: const EdgeInsets.all(20),
       decoration: const BoxDecoration(color: Colors.white, boxShadow: [BoxShadow(color: Colors.black12, blurRadius: 10, offset: Offset(0, -2))]),
@@ -451,7 +473,6 @@ class _BookingDetailScreenState extends State<BookingDetailScreen> {
               flex: 1,
               child: OutlinedButton(
                 onPressed: () async {
-                  // PERBAIKAN: SEKARANG MENGIRIM DATA SAAT KLIK SKIP
                   await Navigator.push(context, MaterialPageRoute(builder: (context) => PemeriksaanScreen(bookingData: _data)));
                   await _updateStatusAPI('Pemeriksaan'); 
                 },

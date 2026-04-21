@@ -48,15 +48,18 @@ class _PemeriksaanScreenState extends State<PemeriksaanScreen> {
   }
 
   Future<void> _submitData() async {
-    final suhu = _suhuController.text;
-    final tinggi = _tinggiController.text;
-    final berat = _beratController.text;
-    final sistolik = _sistolikController.text;
-    final diastolik = _diastolikController.text;
-    final catatan = _catatanController.text;
+    final suhu = _suhuController.text.trim();
+    final tinggi = _tinggiController.text.trim();
+    final berat = _beratController.text.trim();
+    final sistolik = _sistolikController.text.trim();
+    final diastolik = _diastolikController.text.trim();
+    final catatan = _catatanController.text.trim();
 
+    // Validasi dasar
     if (suhu.isEmpty || tinggi.isEmpty || berat.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Suhu, Tinggi, dan Berat tidak boleh kosong!'), backgroundColor: Colors.redAccent));
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Suhu, Tinggi, dan Berat tidak boleh kosong!'), backgroundColor: Colors.redAccent)
+      );
       return;
     }
 
@@ -67,17 +70,20 @@ class _PemeriksaanScreenState extends State<PemeriksaanScreen> {
 
     String idTransaksi = (args?['id_transaksi'] ?? args?['id_booking'] ?? '').toString();
     
-    // --- PERBAIKAN: SEKARANG MENGAMBIL ID CUSTOMER DARI API BARU ---
+    // --- MENGAMBIL ID CUSTOMER DARI API ---
     String idCustomer = (args?['id_customer'] ?? '').toString();
 
     if (idTransaksi.isEmpty || idTransaksi == 'null') {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Gagal: ID Transaksi tidak ditemukan.'), backgroundColor: Colors.redAccent));
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Gagal: ID Transaksi tidak ditemukan.'), backgroundColor: Colors.redAccent)
+      );
       return;
     }
     
-    // Validasi tambahan agar error lebih jelas jika Backend lupa mengirim ID Customer lagi
     if (idCustomer.isEmpty || idCustomer == 'null') {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Gagal: ID Customer tidak ditemukan dari data booking.'), backgroundColor: Colors.redAccent));
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Gagal: ID Customer tidak ditemukan dari data booking.'), backgroundColor: Colors.redAccent)
+      );
       return;
     }
 
@@ -86,7 +92,7 @@ class _PemeriksaanScreenState extends State<PemeriksaanScreen> {
     try {
       final result = await ApiService().storeDataMedis(
         idTransaksi: idTransaksi,
-        idCustomer: idCustomer, // Menggunakan ID yang asli dari Backend
+        idCustomer: idCustomer, // Menggunakan ID asli dari Backend
         suhu: suhu, 
         tinggi: tinggi, 
         berat: berat,
@@ -98,13 +104,21 @@ class _PemeriksaanScreenState extends State<PemeriksaanScreen> {
       if (!mounted) return;
 
       if (result['status'] == 'success' || result['success'] == true) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: const Text('Data pemeriksaan berhasil disimpan!'), backgroundColor: buttonColor));
-        Navigator.pop(context); 
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: const Text('Data pemeriksaan berhasil disimpan!'), backgroundColor: buttonColor)
+        );
+        Navigator.pop(context); // Kembali ke layar detail booking
       } else {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(result['message'] ?? 'Gagal menyimpan'), backgroundColor: Colors.redAccent));
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(result['message'] ?? 'Gagal menyimpan'), backgroundColor: Colors.redAccent)
+        );
       }
     } catch (e) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Kesalahan jaringan: $e'), backgroundColor: Colors.redAccent));
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Kesalahan jaringan: $e'), backgroundColor: Colors.redAccent)
+        );
+      }
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }
@@ -112,6 +126,10 @@ class _PemeriksaanScreenState extends State<PemeriksaanScreen> {
 
   @override
   Widget build(BuildContext context) {
+    // Tangkap arguments untuk nampilin nama Klien di UI
+    final args = widget.bookingData ?? ModalRoute.of(context)?.settings.arguments as Map<String, dynamic>?;
+    final String namaKlien = (args?['customer_name'] ?? args?['customer_fullname'] ?? 'Klien').toString();
+
     return GestureDetector(
       onTap: () => FocusScope.of(context).unfocus(),
       child: Scaffold(
@@ -124,17 +142,34 @@ class _PemeriksaanScreenState extends State<PemeriksaanScreen> {
               Expanded(
                 child: Container(
                   width: double.infinity,
-                  decoration: BoxDecoration(color: bgInner, borderRadius: const BorderRadius.vertical(top: Radius.circular(30))),
+                  decoration: BoxDecoration(
+                    color: bgInner, 
+                    borderRadius: const BorderRadius.vertical(top: Radius.circular(30))
+                  ),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Padding(
                         padding: const EdgeInsets.fromLTRB(24, 24, 24, 16),
-                        child: Row(children: [
-                          GestureDetector(onTap: () => Navigator.pop(context), child: Icon(Icons.arrow_back_ios_new, color: textDark, size: 20)),
-                          const SizedBox(width: 16),
-                          Text('Pemeriksaan', style: TextStyle(fontSize: 24, fontWeight: FontWeight.w800, color: textDark)),
-                        ]),
+                        child: Row(
+                          children: [
+                            GestureDetector(
+                              onTap: () => Navigator.pop(context), 
+                              child: Icon(Icons.arrow_back_ios_new, color: textDark, size: 20)
+                            ),
+                            const SizedBox(width: 16),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text('Pemeriksaan', style: TextStyle(fontSize: 24, fontWeight: FontWeight.w800, color: textDark)),
+                                  // Tambahan UI biar terapis tau ini lagi meriksa siapa
+                                  Text('Klien: $namaKlien', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: textDark.withOpacity(0.6))),
+                                ],
+                              ),
+                            ),
+                          ]
+                        ),
                       ),
                       Divider(color: Colors.black.withOpacity(0.05), height: 1, thickness: 2),
                       Expanded(
@@ -160,12 +195,17 @@ class _PemeriksaanScreenState extends State<PemeriksaanScreen> {
           padding: EdgeInsets.fromLTRB(20, 10, 20, MediaQuery.of(context).padding.bottom + 20),
           child: Row(
             children: [
-              // TOMBOL SIMPAN (KIRI) - TANPA IKON
+              // TOMBOL SIMPAN (KIRI)
               Expanded(
                 flex: 2,
                 child: ElevatedButton(
                   onPressed: _isLoading ? null : _submitData,
-                  style: ElevatedButton.styleFrom(backgroundColor: buttonColor, padding: const EdgeInsets.symmetric(vertical: 16), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)), elevation: 0),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: buttonColor, 
+                    padding: const EdgeInsets.symmetric(vertical: 16), 
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)), 
+                    elevation: 0
+                  ),
                   child: _isLoading 
                       ? const SizedBox(height: 24, width: 24, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 3))
                       : const Text('Simpan', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.white)),
@@ -177,7 +217,11 @@ class _PemeriksaanScreenState extends State<PemeriksaanScreen> {
                 flex: 1,
                 child: OutlinedButton(
                   onPressed: _isLoading ? null : () => Navigator.pop(context),
-                  style: OutlinedButton.styleFrom(side: BorderSide(color: buttonColor, width: 2), padding: const EdgeInsets.symmetric(vertical: 16), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30))),
+                  style: OutlinedButton.styleFrom(
+                    side: BorderSide(color: buttonColor, width: 2), 
+                    padding: const EdgeInsets.symmetric(vertical: 16), 
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30))
+                  ),
                   child: Text('Skip', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: buttonColor)),
                 ),
               ),
@@ -191,19 +235,47 @@ class _PemeriksaanScreenState extends State<PemeriksaanScreen> {
   Widget _buildCardPemeriksaan() {
     return Container(
       padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(color: cardColor, borderRadius: BorderRadius.circular(24), boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.03), blurRadius: 10, offset: const Offset(0, 4))]),
+      decoration: BoxDecoration(
+        color: cardColor, 
+        borderRadius: BorderRadius.circular(24), 
+        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.03), blurRadius: 10, offset: const Offset(0, 4))]
+      ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(children: [Icon(Icons.monitor_heart_outlined, color: buttonColor, size: 24), const SizedBox(width: 8), Text('Tanda Vital & Fisik', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: textDark))]),
+          Row(
+            children: [
+              Icon(Icons.monitor_heart_outlined, color: buttonColor, size: 24), 
+              const SizedBox(width: 8), 
+              Text('Tanda Vital & Fisik', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: textDark))
+            ]
+          ),
           const SizedBox(height: 20),
-          Row(children: [Expanded(child: _buildInputField('Suhu', '°C', _suhuController, isDecimal: true)), const SizedBox(width: 16), Expanded(child: _buildInputField('Tinggi', 'cm', _tinggiController))]),
+          Row(
+            children: [
+              Expanded(child: _buildInputField('Suhu', '°C', _suhuController, isDecimal: true)), 
+              const SizedBox(width: 16), 
+              Expanded(child: _buildInputField('Tinggi', 'cm', _tinggiController))
+            ]
+          ),
           const SizedBox(height: 16),
-          Row(children: [Expanded(child: _buildInputField('Berat', 'kg', _beratController, isDecimal: true)), const SizedBox(width: 16), const Expanded(child: SizedBox())]),
+          Row(
+            children: [
+              Expanded(child: _buildInputField('Berat', 'kg', _beratController, isDecimal: true)), 
+              const SizedBox(width: 16), 
+              const Expanded(child: SizedBox())
+            ]
+          ),
           const SizedBox(height: 24),
           Text('Tekanan Darah', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w700, color: textDark)),
           const SizedBox(height: 12),
-          Row(children: [Expanded(child: _buildInputField('Sistolik', 'mmHg', _sistolikController)), const SizedBox(width: 16), Expanded(child: _buildInputField('Diastolik', 'mmHg', _diastolikController))]),
+          Row(
+            children: [
+              Expanded(child: _buildInputField('Sistolik', 'mmHg', _sistolikController)), 
+              const SizedBox(width: 16), 
+              Expanded(child: _buildInputField('Diastolik', 'mmHg', _diastolikController))
+            ]
+          ),
         ],
       ),
     );
@@ -212,22 +284,42 @@ class _PemeriksaanScreenState extends State<PemeriksaanScreen> {
   Widget _buildCardCatatan() {
     return Container(
       padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(color: cardColor, borderRadius: BorderRadius.circular(24), boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.03), blurRadius: 10, offset: const Offset(0, 4))]),
+      decoration: BoxDecoration(
+        color: cardColor, 
+        borderRadius: BorderRadius.circular(24), 
+        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.03), blurRadius: 10, offset: const Offset(0, 4))]
+      ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Row(children: [Icon(Icons.edit_note_outlined, color: buttonColor, size: 24), const SizedBox(width: 8), Text('Catatan Tambahan', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: textDark))]),
-              ValueListenableBuilder<int>(valueListenable: _catatanLength, builder: (context, value, child) => Text('$value/$_maxCatatanLength', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w500))),
+              Row(
+                children: [
+                  Icon(Icons.edit_note_outlined, color: buttonColor, size: 24), 
+                  const SizedBox(width: 8), 
+                  Text('Catatan Tambahan', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: textDark))
+                ]
+              ),
+              ValueListenableBuilder<int>(
+                valueListenable: _catatanLength, 
+                builder: (context, value, child) => Text('$value/$_maxCatatanLength', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w500))
+              ),
             ],
           ),
           const SizedBox(height: 16),
           TextField(
-            controller: _catatanController, maxLines: 5, maxLength: _maxCatatanLength,
+            controller: _catatanController, 
+            maxLines: 5, 
+            maxLength: _maxCatatanLength,
             buildCounter: (context, {required currentLength, required isFocused, maxLength}) => null,
-            decoration: InputDecoration(hintText: 'Tambahkan catatan...', filled: true, fillColor: inputColor.withOpacity(0.5), border: OutlineInputBorder(borderRadius: BorderRadius.circular(16), borderSide: BorderSide.none)),
+            decoration: InputDecoration(
+              hintText: 'Tambahkan catatan...', 
+              filled: true, 
+              fillColor: inputColor.withOpacity(0.5), 
+              border: OutlineInputBorder(borderRadius: BorderRadius.circular(16), borderSide: BorderSide.none)
+            ),
           ),
         ],
       ),
@@ -243,9 +335,14 @@ class _PemeriksaanScreenState extends State<PemeriksaanScreen> {
         Container(
           decoration: BoxDecoration(color: inputColor, borderRadius: BorderRadius.circular(14)),
           child: TextField(
-            controller: controller, keyboardType: TextInputType.numberWithOptions(decimal: isDecimal), 
+            controller: controller, 
+            keyboardType: TextInputType.numberWithOptions(decimal: isDecimal), 
             style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold),
-            decoration: InputDecoration(border: InputBorder.none, contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14), suffixText: suffix),
+            decoration: InputDecoration(
+              border: InputBorder.none, 
+              contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14), 
+              suffixText: suffix
+            ),
           ),
         ),
       ],

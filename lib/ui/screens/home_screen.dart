@@ -72,23 +72,18 @@ class _HomeScreenState extends State<HomeScreen> {
       if (jobsResponse['success'] == true && jobsResponse['data'] != null) {
         List jobs = jobsResponse['data'];
         
-        // --- PERBAIKAN 1: Filter hanya mencari tugas yang statusnya BUKAN closed/completed ---
         List openJobs = jobs.where((job) {
           final String status = (job['status'] ?? job['booking_status'] ?? '').toString().toLowerCase().trim();
           return !['close', 'closed', 'completed'].contains(status);
         }).toList();
 
         if (openJobs.isNotEmpty) {
-          // --- PERBAIKAN BARU: Pengurutan data agar yang terbaru berada di paling atas ---
           openJobs.sort((a, b) {
             DateTime timeA = DateTime.tryParse(a['start_time']?.toString() ?? '') ?? DateTime(2000);
             DateTime timeB = DateTime.tryParse(b['start_time']?.toString() ?? '') ?? DateTime(2000);
-            
-            // Membandingkan timeB dengan timeA (Descending/Terbaru di atas)
             return timeB.compareTo(timeA); 
           });
 
-          // Ambil job teratas (yang paling baru) dari list yang sudah diurutkan
           nextBook = openJobs.first; 
           
           // SIMULASI NOTIFIKASI TUGAS BARU 
@@ -509,7 +504,6 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
           ElevatedButton(
             onPressed: () {
-              // --- PERBAIKAN 2: Auto-refresh saat kembali dari Detail ---
               Navigator.pushNamed(context, '/booking_detail', arguments: _nextBooking).then((_) {
                 _loadData();
               });

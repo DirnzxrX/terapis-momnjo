@@ -21,12 +21,11 @@ class _ActiveJobScreenState extends State<ActiveJobScreen> {
 
   Timer? _timer;
   int _secondsElapsed = 0; 
-  int _estimatedTotalSeconds = 0; // Akan dihitung otomatis
+  int _estimatedTotalSeconds = 0; 
   
   bool _hasStarted = false; 
   bool _isPaused = false; 
 
-  // --- MENGGANTI _steps DENGAN DATA DINAMIS ---
   List<dynamic> _treatments = [];
   List<bool> _treatmentsDone = [];
 
@@ -52,9 +51,8 @@ class _ActiveJobScreenState extends State<ActiveJobScreen> {
             int qty = item is Map ? (int.tryParse(item['qty']?.toString() ?? '1') ?? 1) : 1;
             totalMenit += (dur * qty);
           }
-          _estimatedTotalSeconds = totalMenit * 60; // Konversi ke detik
+          _estimatedTotalSeconds = totalMenit * 60; 
         } else {
-          // Fallback jika array treatments kosong
           _estimatedTotalSeconds = _extractDurationFromProductName(_productName);
         }
 
@@ -70,12 +68,16 @@ class _ActiveJobScreenState extends State<ActiveJobScreen> {
             _treatmentsDone = List.filled(_treatments.length, false);
           }
 
-          if (_hasStarted) {
+          if (_hasStarted && !_isPaused) {
             _startTimer();
           }
         } else {
-          // Inisialisasi status checklist default (semua false)
-          _treatmentsDone = List.filled(_treatments.length, false);
+          // Cek kalau dari API udah ada yang is_done = true
+          _treatmentsDone = List.generate(_treatments.length, (index) {
+            final item = _treatments[index];
+            if (item is Map && item['is_done'] == true) return true;
+            return false;
+          });
         }
       }
       _isDataLoaded = true;
@@ -111,7 +113,6 @@ class _ActiveJobScreenState extends State<ActiveJobScreen> {
   }
 
   Future<void> _handleTimerAction() async {
-    // KONDISI AWAL MULAI: Hanya jalankan timer lokal, TIDAK ADA tembak API
     if (!_hasStarted) {
       setState(() {
         _hasStarted = true;
@@ -126,7 +127,6 @@ class _ActiveJobScreenState extends State<ActiveJobScreen> {
         ),
       );
     } else {
-      // PAUSE / RESUME BIASA
       setState(() {
         _isPaused = !_isPaused;
         if (!_isPaused && (_timer == null || !_timer!.isActive)) {
@@ -142,7 +142,18 @@ class _ActiveJobScreenState extends State<ActiveJobScreen> {
     }
   }
 
-  void _showFinishDialog() {
+void _showFinishDialog() {
+    // VALIDASI: Pastikan semua treatment sudah tercentang
+    if (_treatmentsDone.contains(false)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text("Harap centang semua layanan sebelum menyelesaikan treatment!"), 
+          backgroundColor: Colors.redAccent
+        ),
+      );
+      return;
+    }
+
     showDialog(
       context: context,
       barrierDismissible: !_isApiLoading,
@@ -162,7 +173,10 @@ class _ActiveJobScreenState extends State<ActiveJobScreen> {
                   : const Text("Pastikan semua tahapan sudah selesai."),
               actions: [
                 if (!_isApiLoading)
-                  TextButton(onPressed: () => Navigator.pop(context), child: const Text("Batal", style: TextStyle(color: Colors.grey))),
+                  TextButton(
+                    onPressed: () => Navigator.pop(context), 
+                    child: const Text("Batal", style: TextStyle(color: Colors.grey))
+                  ),
                 ElevatedButton(
                   onPressed: _isApiLoading ? null : () async {
                     setDialogState(() => _isApiLoading = true);
@@ -171,17 +185,32 @@ class _ActiveJobScreenState extends State<ActiveJobScreen> {
                     bool isAllSuccess = true;
                     String errorMessage = "";
 
-                    // --- LOOPING TEMBAK API UNTUK SETIAP TREATMENT ---
-                    for (var item in _treatments) {
-                      String currentProductName = item is Map ? (item['name'] ?? '') : item.toString();
-                      
-                      if (currentProductName.isNotEmpty) {
-                        final result = await api.updateJobStatus(_idTransaksi, currentProductName);
+                    // --- LOOPING TEMBAK API ---
+                    for (int i = 0; i < _treatments.length; i++) {
+                      if (_treatmentsDone[i]) {
+                        var item = _treatments[i];
                         
-                        if (result['status'] != 'success') {
-                          isAllSuccess = false;
-                          errorMessage = result['message'] ?? 'Gagal menyelesaikan $currentProductName';
-                          break; // Hentikan looping jika ada satu yang error dari server
+                        // 🔥 INI KUNCINYA Tuan! 
+                        // Kalau dari backend udah true, kita SKIP aja gak usah nembak API lagi
+                        bool alreadyDoneFromBackend = item is Map && item['is_done'] == true;
+                        if (alreadyDoneFromBackend) {
+                          continue; // Langsung lompati ke layanan berikutnya
+                        }
+
+                        String currentProductName = item is Map ? (item['name'] ?? '') : item.toString();
+                        
+                        if (currentProductName.isNotEmpty) {
+                          final result = await api.updateJobStatus(_idTransaksi, currentProductName);
+                          
+                          if (result['status'] != 'success' && result['status'] != 200) {
+                            // Jaga-jaga kalau pesannya beda dikit dari backend
+                            String msg = result['message']?.toString().toLowerCase() ?? '';
+                            if (!msg.contains('sudah selesai') && !msg.contains('sudah diselesaikan')) {
+                              isAllSuccess = false;
+                              errorMessage = result['message'] ?? 'Gagal menyelesaikan $currentProductName';
+                              break; 
+                            }
+                          }
                         }
                       }
                     }
@@ -192,9 +221,12 @@ class _ActiveJobScreenState extends State<ActiveJobScreen> {
                       Navigator.pop(context); // Tutup dialog
                       _timer?.cancel();
                       
-                      // --- PERUBAHAN DI SINI ---
-                      // Semua sukses di server, kita kembali ke halaman Detail Booking
-                      Navigator.pop(context, {'action': 'completed'});
+                      // Kembali ke halaman Detail Booking
+                      Navigator.pop(context, {
+                        'action': 'finish_treatment',
+                        'durasi_aktual': _secondsElapsed,
+                        'stepsDone': _treatmentsDone,
+                      });
                     } else {
                       Navigator.pop(context); // Tutup dialog
                       ScaffoldMessenger.of(context).showSnackBar(
@@ -235,7 +267,7 @@ class _ActiveJobScreenState extends State<ActiveJobScreen> {
       'action': 'save_state',
       'product_name': _productName,
       'secondsElapsed': _secondsElapsed,
-      'treatmentsDone': _treatmentsDone, // Update key simpanan state
+      'treatmentsDone': _treatmentsDone,
       'hasStarted': _hasStarted,
       'isPaused': _isPaused,
     });
@@ -274,7 +306,7 @@ class _ActiveJobScreenState extends State<ActiveJobScreen> {
                         const SizedBox(height: 16),
                         _buildTimerCard(),
                         const SizedBox(height: 24),
-                        _buildProgressSection(), // Menampilkan daftar card
+                        _buildProgressSection(), 
                       ],
                     ),
                   ],
@@ -370,7 +402,6 @@ class _ActiveJobScreenState extends State<ActiveJobScreen> {
     );
   }
 
-  // --- MERENDER DAFTAR CARD TREATMENT ---
   Widget _buildProgressSection() {
     if (_treatments.isEmpty) return const SizedBox.shrink();
 
@@ -392,7 +423,6 @@ class _ActiveJobScreenState extends State<ActiveJobScreen> {
     );
   }
 
-  // --- WIDGET CARD UNTUK SETIAP TREATMENT ---
   Widget _buildTreatmentCard(int index, dynamic item, {required bool isDone}) {
     String name = item is Map ? (item['name'] ?? 'Layanan') : item.toString();
     String qty = item is Map ? (item['qty']?.toString() ?? '1') : '1';
@@ -402,7 +432,6 @@ class _ActiveJobScreenState extends State<ActiveJobScreen> {
       padding: const EdgeInsets.only(bottom: 12.0),
       child: InkWell(
         onTap: () {
-          // Hanya bisa diceklis jika job sudah di-start
           if (!_hasStarted) {
              ScaffoldMessenger.of(context).showSnackBar(
               const SnackBar(content: Text('Mulai treatment terlebih dahulu.'), duration: Duration(seconds: 1)),
@@ -442,7 +471,7 @@ class _ActiveJobScreenState extends State<ActiveJobScreen> {
                         fontSize: 14, 
                         fontWeight: FontWeight.bold,
                         color: Colors.black87,
-                        decoration: isDone ? TextDecoration.lineThrough : null, // Efek coret jika selesai
+                        decoration: isDone ? TextDecoration.lineThrough : null, 
                       )
                     ),
                     const SizedBox(height: 4),

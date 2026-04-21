@@ -1,5 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:therapist_momnjo/data/api_service.dart';
+import 'package:intl/intl.dart';
+import 'pemeriksaan_screen.dart'; 
 
 class DetailBookingOnsiteScreen extends StatefulWidget {
   const DetailBookingOnsiteScreen({Key? key}) : super(key: key);
@@ -14,6 +17,7 @@ class _DetailBookingOnsiteScreenState extends State<DetailBookingOnsiteScreen> {
   String _currentStatus = '';
   Map<String, dynamic>? _data;
   bool _isInitialized = false;
+  bool _isUpdatingStatus = false; 
   
   // STATE: Untuk menyimpan "titipan" data dari layar Active Job
   Map<String, dynamic>? _savedActiveJobState; 
@@ -25,10 +29,11 @@ class _DetailBookingOnsiteScreenState extends State<DetailBookingOnsiteScreen> {
       final args = ModalRoute.of(context)?.settings.arguments as Map<String, dynamic>?;
       if (args != null) {
         _data = args;
-        String passedStatus = args['status'] ?? 'Accepted';
+        String passedStatus = args['booking_status'] ?? args['status'] ?? 'Accepted';
+        passedStatus = passedStatus.trim(); 
         
         // Jika dari API/sebelumnya statusnya 'new' atau 'open', otomatis anggap 'Accepted'
-        if (passedStatus.toLowerCase() == 'new' || passedStatus.toLowerCase() == 'open') {
+        if (['new', 'open', 'menunggu', 'pending'].contains(passedStatus.toLowerCase())) {
           passedStatus = 'Accepted';
         }
         _currentStatus = passedStatus;
@@ -40,17 +45,42 @@ class _DetailBookingOnsiteScreenState extends State<DetailBookingOnsiteScreen> {
     }
   }
 
-  void _nextStatus() {
-    setState(() {
-      final s = _currentStatus.toLowerCase();
-      if (s == 'accepted' || s == 'new' || s == 'open') {
-        _currentStatus = 'Pemeriksaan'; // Langsung ke Pemeriksaan
-      } else if (s == 'pemeriksaan') {
-        _currentStatus = 'Started';     
-      } else if (s == 'started') {
-        _currentStatus = 'Completed';
+  // --- FUNGSI UPDATE STATUS KE BACKEND ---
+  Future<void> _updateStatusAPI(String newStatus) async {
+    final String bookingId = _data?['id_booking']?.toString() ?? '';
+    if (bookingId.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('ID Booking tidak ditemukan. Gagal update.')),
+      );
+      return;
+    }
+
+    setState(() { _isUpdatingStatus = true; });
+    
+    final api = ApiService();
+    final response = await api.updateBookingStatus(
+      idBooking: bookingId, 
+      newStatus: newStatus,
+    );
+
+    if (mounted) {
+      setState(() { _isUpdatingStatus = false; });
+      if (response['success'] == true || response['status'] == 'success') {
+        setState(() {
+          _currentStatus = newStatus;
+          _data?['booking_status'] = newStatus; 
+        });
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(response['message'] ?? 'Gagal update status server')),
+        );
+        // Fallback update lokal biar UI tetep jalan pas testing
+        setState(() {
+          _currentStatus = newStatus;
+          _data?['booking_status'] = newStatus; 
+        });
       }
-    });
+    }
   }
 
   // FUNGSI PUSAT: Membuka layar Job Aktif (ActiveJobScreen)
@@ -68,12 +98,12 @@ class _DetailBookingOnsiteScreenState extends State<DetailBookingOnsiteScreen> {
       final Map<String, dynamic> resultMap = Map<String, dynamic>.from(result);
 
       if (resultMap['action'] == 'finish_treatment') {
-        setState(() {
-          _currentStatus = 'Completed';
-        });
-        _data?['durasi_aktual'] = resultMap['durasi_aktual'];
+        // 1. Panggil API update status ke Closed
+        await _updateStatusAPI('Closed');
         
         setState(() {
+          _currentStatus = 'Completed'; 
+          _data?['durasi_aktual'] = resultMap['durasi_aktual'];
           _savedActiveJobState = {
             'secondsElapsed': resultMap['durasi_aktual'],
             'hasStarted': true,
@@ -81,6 +111,11 @@ class _DetailBookingOnsiteScreenState extends State<DetailBookingOnsiteScreen> {
             'stepsDone': resultMap['stepsDone'] ?? [true, true, true, true, true],
           };
         });
+
+        // 🔥 PERBAIKAN: Di sini kemaren ada kode pushReplacementNamed ke /visit_report
+        // Udah gua hapus. Jadi dia bakal cuma update UI ke status 'Completed'
+        // dan tombol di bawah bakal otomatis berubah jadi "BUAT LAPORAN KUNJUNGAN".
+
       } else if (resultMap['action'] == 'save_state') {
         setState(() {
           _currentStatus = 'Started';
@@ -93,7 +128,7 @@ class _DetailBookingOnsiteScreenState extends State<DetailBookingOnsiteScreen> {
   @override
   Widget build(BuildContext context) {
     // --- MENGAMBIL DATA DARI STRUKTUR API TERBARU ---
-    final String nama = _data?['customer_name'] ?? _data?['customer_fullname'] ?? 'Siti Rahmawati';
+    final String nama = _data?['customer_name'] ?? _data?['customer_fullname'] ?? 'Klien';
     final String telepon = _data?['customer_phone'] ?? _data?['phone'] ?? '0812 456 7890';
     
     // Lokasi dari API
@@ -106,7 +141,6 @@ class _DetailBookingOnsiteScreenState extends State<DetailBookingOnsiteScreen> {
     // MENGAMBIL LIST LAYANAN DINAMIS
     List<dynamic> layananList = [];
     if (_data != null && _data!['treatment_name'] != null) {
-      // Jika data datang dari API baru (satu treatment)
       layananList = [
         {
           'name': _data!['treatment_name'],
@@ -114,7 +148,6 @@ class _DetailBookingOnsiteScreenState extends State<DetailBookingOnsiteScreen> {
         }
       ];
     } else {
-      // Fallback ke format lama
       layananList = _data?['treatments'] ?? _data?['services'] ?? [
         {
           'name': _data?['deskripsi'] ?? 'Mother Care Massage',
@@ -132,10 +165,8 @@ class _DetailBookingOnsiteScreenState extends State<DetailBookingOnsiteScreen> {
         leading: IconButton(
           icon: const Icon(Icons.arrow_back, color: Colors.black87),
           onPressed: () async {
-            if (_currentStatus.toLowerCase() == 'completed') {
-              setState(() {
-                _currentStatus = 'Started'; 
-              });
+            // Kalau udah completed, biarin dia back biasa ke layar Schedule
+            if (_currentStatus.toLowerCase() == 'started') {
               await _openActiveJob();
             } else {
               Navigator.pop(context);
@@ -191,7 +222,7 @@ class _DetailBookingOnsiteScreenState extends State<DetailBookingOnsiteScreen> {
       case 'accepted': statusBg = const Color(0xFF9C27B0); break;
       case 'pemeriksaan': statusBg = Colors.purple.shade400; break; 
       case 'started': statusBg = Colors.indigo.shade400; break;
-      case 'completed': statusBg = Colors.green.shade500; break;
+      case 'completed': case 'closed': statusBg = Colors.green.shade500; break;
       default: statusBg = Colors.grey;
     }
 
@@ -319,7 +350,7 @@ class _DetailBookingOnsiteScreenState extends State<DetailBookingOnsiteScreen> {
               children: [
                 Icon(Icons.access_time_filled, size: 16, color: Colors.grey.shade500),
                 const SizedBox(width: 8),
-                Text('Waktu Mulai: $startTime', style: TextStyle(fontSize: 13, color: Colors.black87, fontWeight: FontWeight.bold)),
+                Text('Waktu Mulai: ${DateFormat('dd MMM yyyy, HH:mm').format(DateTime.tryParse(startTime) ?? DateTime.now())}', style: const TextStyle(fontSize: 13, color: Colors.black87, fontWeight: FontWeight.bold)),
               ],
             ),
             const Divider(height: 24),
@@ -377,12 +408,12 @@ class _DetailBookingOnsiteScreenState extends State<DetailBookingOnsiteScreen> {
         borderRadius: BorderRadius.circular(16),
         boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.03), blurRadius: 8, offset: const Offset(0, 4))],
       ),
-      child: const Column(
+      child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text('Catatan Customer', style: TextStyle(fontSize: 12, color: Colors.black54, fontWeight: FontWeight.bold)),
+          const Text('Catatan Customer', style: TextStyle(fontSize: 12, color: Colors.black54, fontWeight: FontWeight.bold)),
           const SizedBox(height: 8),
-          Text('Tidak ada catatan khusus dari pelanggan.', style: TextStyle(fontSize: 14)),
+          Text(_data?['notes'] ?? _data?['catatan'] ?? 'Tidak ada catatan khusus dari pelanggan.', style: const TextStyle(fontSize: 14)),
         ],
       ),
     );
@@ -393,9 +424,9 @@ class _DetailBookingOnsiteScreenState extends State<DetailBookingOnsiteScreen> {
     
     // LOGIKA TIMELINE ONSITE: Tanpa OTW dan Arrived
     bool isAssigned = !['new', 'open'].contains(s);
-    bool isPemeriksaan = ['pemeriksaan', 'started', 'completed'].contains(s); 
-    bool isStarted = ['started', 'completed'].contains(s);
-    bool isCompleted = s == 'completed';
+    bool isPemeriksaan = ['pemeriksaan', 'started', 'completed', 'closed'].contains(s); 
+    bool isStarted = ['started', 'completed', 'closed'].contains(s);
+    bool isCompleted = ['completed', 'closed'].contains(s);
 
     return Column(
       children: [
@@ -434,12 +465,12 @@ class _DetailBookingOnsiteScreenState extends State<DetailBookingOnsiteScreen> {
   Widget _buildBottomButton() {
     final s = _currentStatus.toLowerCase();
 
-    // TAMPILAN BUTTON: Langsung masuk Pemeriksaan
-    String text = 'PEMERIKSAAN KLIEN';
-    if (s == 'accepted' || s == 'new' || s == 'open') text = 'PEMERIKSAAN KLIEN'; 
-    else if (s == 'pemeriksaan') text = 'START TREATMENT'; 
+    // TAMPILAN BUTTON SESUAI STATUS ONSITE
+    String text = 'PANGGIL KLIEN (PEMERIKSAAN)';
+    if (s == 'accepted' || s == 'new' || s == 'open') text = 'PANGGIL KLIEN (PEMERIKSAAN)'; 
+    else if (s == 'pemeriksaan') text = 'MULAI SESI TREATMENT'; 
     else if (s == 'started') text = 'LANJUT TREATMENT';
-    else if (s == 'completed') text = 'COMPLETE TREATMENT';
+    else if (s == 'completed' || s == 'closed') text = 'BUAT LAPORAN KUNJUNGAN';
 
     return Container(
       padding: const EdgeInsets.all(20),
@@ -449,18 +480,29 @@ class _DetailBookingOnsiteScreenState extends State<DetailBookingOnsiteScreen> {
       ),
       child: SafeArea(
         child: ElevatedButton(
-          onPressed: () async {
-            // LOGIKA STATUS SELANJUTNYA UNTUK ONSITE
+          onPressed: _isUpdatingStatus ? null : () async {
+            
+            // 1. STATUS AWAL -> Buka Pemeriksaan Klien
             if (s == 'accepted' || s == 'new' || s == 'open') {
-              setState(() { _currentStatus = 'Pemeriksaan'; });
+              await Navigator.push(context, MaterialPageRoute(builder: (context) => PemeriksaanScreen(bookingData: _data)));
+              await _updateStatusAPI('Pemeriksaan'); 
             }
-            else if (s == 'pemeriksaan' || s == 'started') {
-              if (s == 'pemeriksaan') {
-                setState(() { _currentStatus = 'Started'; });
-              }
+            
+            // 2. PEMERIKSAAN -> Buka Timer Active Job
+            else if (s == 'pemeriksaan') {
+              await _updateStatusAPI('Started');
               await _openActiveJob();
             } 
-            else if (s == 'completed') {
+            
+            // 3. STARTED -> Lanjut Timer Active Job
+            else if (s == 'started') {
+              await _openActiveJob();
+            } 
+            
+            // 4. COMPLETED/CLOSED -> Buka Form Laporan Visit
+            else if (s == 'completed' || s == 'closed') {
+              // 🔥 INI DIA TUAN! 
+              // Pas tombol "Buat Laporan Kunjungan" dipencet, baru dia ngarah ke layar laporannya!
               Navigator.pushReplacementNamed(
                 context, 
                 '/visit_report',
@@ -469,12 +511,14 @@ class _DetailBookingOnsiteScreenState extends State<DetailBookingOnsiteScreen> {
             } 
           },
           style: ElevatedButton.styleFrom(
-            backgroundColor: primaryPink,
+            backgroundColor: (s == 'accepted' || s == 'new' || s == 'open') ? Colors.teal : primaryPink,
             minimumSize: const Size(double.infinity, 54),
             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
             elevation: 0,
           ),
-          child: Text(text, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.white)),
+          child: _isUpdatingStatus 
+              ? const SizedBox(width: 24, height: 24, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
+              : Text(text, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.white)),
         ),
       ),
     );
