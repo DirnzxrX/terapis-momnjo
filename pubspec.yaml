@@ -22,10 +22,10 @@ dependencies:
 
   # Maps & Location (Screen 5 & 7)
   google_maps_flutter: ^2.5.3
-  geolocator: ^10.1.0 
+  geolocator: ^14.0.2 
   
   # Kamera & Upload Foto (Screen 7 & 8)
-  image_picker: ^1.0.7
+  image_picker: ^1.2.1
   
   # Tanda Tangan Digital (Screen 8)
   signature: ^5.4.0 

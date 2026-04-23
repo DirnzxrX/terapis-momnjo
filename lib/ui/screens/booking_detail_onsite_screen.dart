@@ -430,10 +430,10 @@ class _DetailBookingOnsiteScreenState extends State<DetailBookingOnsiteScreen> {
 
     return Column(
       children: [
-        _buildTimelineStep('Assigned', isAssigned ? 'Terkonfirmasi' : 'Menunggu', isAssigned, false),
-        _buildTimelineStep('Pemeriksaan', isPemeriksaan ? 'Selesai' : '-', isPemeriksaan, false), 
-        _buildTimelineStep('Started', isStarted ? 'Mulai' : '-', isStarted, false),
-        _buildTimelineStep('Completed', isCompleted ? 'Selesai' : '-', isCompleted, true),
+        _buildTimelineStep('Pekerjaan di Terima', isAssigned ? '' : 'Menunggu', isAssigned, false),
+        _buildTimelineStep('Cek Kesehatan', isPemeriksaan ? '' : '-', isPemeriksaan, false), 
+        _buildTimelineStep('Mulai', isStarted ? '' : '-', isStarted, false),
+        _buildTimelineStep('Selesai', isCompleted ? '' : '-', isCompleted, true),
       ],
     );
   }

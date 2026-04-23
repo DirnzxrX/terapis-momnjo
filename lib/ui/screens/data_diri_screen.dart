@@ -46,11 +46,11 @@ class DataDiriScreen extends StatelessWidget {
               _buildInfoSection(
                 title: 'Informasi Pribadi',
                 items: [
-                  _buildInfoItem(Icons.person_outline, 'Nama Lengkap', 'Rina Terapis'),
+                  _buildInfoItem(Icons.person_outline, 'Nama Lengkap', 'Andiro'),
                   _buildInfoItem(Icons.phone_outlined, 'Nomor Telepon', '+62 812 3456 7890'),
                   _buildInfoItem(Icons.email_outlined, 'Email', 'rina.terapis@momnjo.com'),
                   _buildInfoItem(Icons.calendar_today_outlined, 'Tanggal Lahir', '12 Agustus 1995'),
-                  _buildInfoItem(Icons.female_outlined, 'Jenis Kelamin', 'Perempuan'),
+                  _buildInfoItem(Icons.female_outlined, 'Jenis Kelamin', 'Laki - Laki'),
                   _buildInfoItem(Icons.location_on_outlined, 'Alamat', 'Jl. Melati No. 10, Bandung'),
                 ],
               ),
@@ -60,10 +60,10 @@ class DataDiriScreen extends StatelessWidget {
               _buildInfoSection(
                 title: 'Informasi Pekerjaan',
                 items: [
-                  _buildInfoItem(Icons.badge_outlined, 'ID Terapis', 'TRP00128'),
-                  _buildInfoItem(Icons.map_outlined, 'Area Kerja', 'Bandung & Cimahi'),
-                  _buildInfoItem(Icons.work_outline, 'Pengalaman', '3 Tahun'),
-                  _buildInfoItem(Icons.spa_outlined, 'Spesialisasi', 'Mother Care, Baby Spa'),
+                  _buildInfoItem(Icons.badge_outlined, 'No.Pegawai', 'TRP00128'),
+                  _buildInfoItem(Icons.map_outlined, 'Gerai', 'Bandung & Cimahi'),
+                  // _buildInfoItem(Icons.work_outline, 'Pengalaman', '3 Tahun'),
+                  // _buildInfoItem(Icons.spa_outlined, 'Spesialisasi', 'Mother Care, Baby Spa'),
                 ],
               ),
               const SizedBox(height: 40),

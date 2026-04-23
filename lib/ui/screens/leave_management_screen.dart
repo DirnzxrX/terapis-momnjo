@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
-import 'package:shared_preferences/shared_preferences.dart'; // WAJIB UNTUK MEMORI
-import 'dart:convert'; // WAJIB UNTUK MENGUBAH LIST/MAP MENJADI STRING JSON
+import 'package:shared_preferences/shared_preferences.dart';
+import 'dart:convert';
 
 class LeaveManagementScreen extends StatefulWidget {
   const LeaveManagementScreen({Key? key}) : super(key: key);
@@ -15,29 +15,17 @@ class _LeaveManagementScreenState extends State<LeaveManagementScreen> {
   final Color textDarkBrown = const Color(0xFF4A332B);
   
   // --- STATE VARIABLES ---
-  bool _isDataLoaded = false; // Penanda agar UI menunggu memori selesai dibaca
+  bool _isDataLoaded = false;
   bool _isOnDuty = false; 
   double _dragValue = 0.0; 
   bool _isDragging = false;
 
-  String _selectedLeaveType = 'Cuti Tahunan';
-  final List<String> _leaveTypes = ['Cuti Tahunan', 'Sakit', 'Cuti Darurat', 'Cuti Melahirkan', 'Izin'];
-  
-  String _selectedHistoryTab = 'Riwayat Cuti';
-
-  DateTime? _startDate;
-  DateTime? _endDate;
-  final TextEditingController _reasonController = TextEditingController();
+  // Variabel untuk menyimpan nama user yang login
+  String _therapistName = 'Memuat...';
 
   DateTime? _filterStartDate;
   DateTime? _filterEndDate;
 
-  final List<Map<String, dynamic>> _leaveHistory = [
-    {'title': 'Cuti Tahunan', 'date': '16 Apr 2026 - 18 Apr 2026', 'reason': 'Acara pernikahan keluarga', 'status': 'Menunggu', 'color': Colors.orange.shade300},
-    {'title': 'Cuti Sakit', 'date': '10 Mar 2026 - 11 Mar 2026', 'reason': 'Gejala flu dan demam', 'status': 'Disetujui', 'color': Colors.green.shade400},
-  ];
-
-  // Hapus kata 'final' agar list riwayat absensi ini bisa ditimpa oleh memori lokal
   List<Map<String, dynamic>> _attendanceHistory = [
     {
       'type': 'Daily Record', 'date': '16 Apr 2026', 
@@ -64,43 +52,40 @@ class _LeaveManagementScreenState extends State<LeaveManagementScreen> {
   @override
   void initState() {
     super.initState();
-    _loadDutyStatus(); // 🚨 BACA MEMORI SAAT LAYAR DIBANGUN
+    _loadDutyStatus();
   }
 
-  // --- ARSITEKTUR MEMORI: MEMBACA STATUS DAN RIWAYAT ---
+  // --- ARSITEKTUR MEMORI: MEMBACA STATUS, NAMA USER, DAN RIWAYAT ---
   Future<void> _loadDutyStatus() async {
     final prefs = await SharedPreferences.getInstance();
     if (!mounted) return;
     
-    // Load Riwayat Absensi dari memori HP
+    // 1. Load Nama Terapis yang Login (Pastikan diset saat halaman Login)
+    String? savedName = prefs.getString('user_name');
+    
+    // 2. Load Riwayat Absensi
     final String? savedHistory = prefs.getString('attendance_history');
     if (savedHistory != null) {
       try {
         final List<dynamic> decodedHistory = jsonDecode(savedHistory);
         _attendanceHistory = decodedHistory.map((e) => Map<String, dynamic>.from(e)).toList();
       } catch (e) {
-        debugPrint('Gagal membaca riwayat absensi dari memori: $e');
+        debugPrint('Gagal membaca riwayat absensi: $e');
       }
     }
 
     setState(() {
+      _therapistName = (savedName != null && savedName.isNotEmpty) ? savedName : 'Terapis (Belum diset)';
       _isOnDuty = prefs.getBool('is_on_duty') ?? false;
       _dragValue = _isOnDuty ? 1.0 : 0.0;
-      _isDataLoaded = true; // Sinyal bahwa memori selesai dibaca
+      _isDataLoaded = true;
     });
   }
 
-  // --- FUNGSI UNTUK MENYIMPAN RIWAYAT ABSENSI KE MEMORI ---
   Future<void> _saveAttendanceHistory() async {
     final prefs = await SharedPreferences.getInstance();
     final String encodedHistory = jsonEncode(_attendanceHistory);
     await prefs.setString('attendance_history', encodedHistory);
-  }
-
-  @override
-  void dispose() {
-    _reasonController.dispose();
-    super.dispose();
   }
 
   String _getCurrentTime() {
@@ -130,11 +115,9 @@ class _LeaveManagementScreenState extends State<LeaveManagementScreen> {
     return null;
   }
 
-  // --- ARSITEKTUR MEMORI: MENYIMPAN STATUS BARU ---
   Future<void> _handleDutyToggle(bool newDutyStatus) async {
     if (_isOnDuty == newDutyStatus) return; 
 
-    // 🚨 SIMPAN KE MEMORI HP SETIAP KALI SLIDER DIGESER
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool('is_on_duty', newDutyStatus);
 
@@ -166,7 +149,6 @@ class _LeaveManagementScreenState extends State<LeaveManagementScreen> {
       }
     });
 
-    // 🚨 SIMPAN RIWAYAT BARU KE DALAM MEMORI SETELAH UI DIUPDATE
     await _saveAttendanceHistory();
   }
 
@@ -182,7 +164,7 @@ class _LeaveManagementScreenState extends State<LeaveManagementScreen> {
     );
   }
 
-  Future<void> _selectDate(BuildContext context, {required bool isStart, required bool isForFilter}) async {
+  Future<void> _selectDate(BuildContext context, {required bool isStart}) async {
     final DateTime initial = DateTime.now();
     final DateTime? picked = await showDatePicker(
       context: context,
@@ -201,31 +183,18 @@ class _LeaveManagementScreenState extends State<LeaveManagementScreen> {
 
     if (picked != null) {
       setState(() {
-        if (isForFilter) {
-          if (isStart) {
-            _filterStartDate = picked;
-            if (_filterEndDate != null && _filterEndDate!.isBefore(_filterStartDate!)) _filterEndDate = null;
-          } else {
-            if (_filterStartDate != null && picked.isBefore(_filterStartDate!)) {
-              _showInfoMessage('Tanggal Selesai tidak boleh sebelum Tanggal Mulai!', isError: true);
-              return;
-            }
-            _filterEndDate = picked;
-          }
-          if (_filterStartDate != null && _filterEndDate != null) {
-            _showInfoMessage('Memfilter data dari ${_formatDate(_filterStartDate)} ke ${_formatDate(_filterEndDate)}');
-          }
+        if (isStart) {
+          _filterStartDate = picked;
+          if (_filterEndDate != null && _filterEndDate!.isBefore(_filterStartDate!)) _filterEndDate = null;
         } else {
-          if (isStart) {
-            _startDate = picked;
-            if (_endDate != null && _endDate!.isBefore(_startDate!)) _endDate = null;
-          } else {
-            if (_startDate != null && picked.isBefore(_startDate!)) {
-              _showInfoMessage('Tanggal Selesai tidak boleh sebelum Tanggal Mulai!', isError: true);
-              return;
-            }
-            _endDate = picked;
+          if (_filterStartDate != null && picked.isBefore(_filterStartDate!)) {
+            _showInfoMessage('Tanggal Selesai tidak boleh sebelum Tanggal Mulai!', isError: true);
+            return;
           }
+          _filterEndDate = picked;
+        }
+        if (_filterStartDate != null && _filterEndDate != null) {
+          _showInfoMessage('Memfilter data dari ${_formatDate(_filterStartDate)} ke ${_formatDate(_filterEndDate)}');
         }
       });
     }
@@ -235,36 +204,6 @@ class _LeaveManagementScreenState extends State<LeaveManagementScreen> {
     if (date == null) return 'Pilih Tanggal';
     const months = ['Jan', 'Feb', 'Mar', 'Apr', 'Mei', 'Jun', 'Jul', 'Agt', 'Sep', 'Okt', 'Nov', 'Des'];
     return '${date.day.toString().padLeft(2, '0')} ${months[date.month - 1]} ${date.year}';
-  }
-
-  void _submitLeaveRequest() {
-    if (_startDate == null || _endDate == null) {
-      _showInfoMessage('Harap pilih Tanggal Mulai dan Tanggal Selesai terlebih dahulu.', isError: true);
-      return;
-    }
-    if (_reasonController.text.trim().isEmpty) {
-      _showInfoMessage('Harap isi alasan pengajuan cuti Anda.', isError: true);
-      return;
-    }
-
-    String dateRange = '${_formatDate(_startDate)} - ${_formatDate(_endDate)}';
-
-    setState(() {
-      _leaveHistory.insert(0, {
-        'title': _selectedLeaveType,
-        'date': dateRange,
-        'reason': _reasonController.text.trim(),
-        'status': 'Menunggu',
-        'color': Colors.orange.shade300,
-      });
-
-      _startDate = null;
-      _endDate = null;
-      _reasonController.clear();
-      _selectedLeaveType = _leaveTypes.first;
-    });
-
-    _showInfoMessage('Pengajuan $_selectedLeaveType berhasil dikirim!');
   }
 
   @override
@@ -286,7 +225,7 @@ class _LeaveManagementScreenState extends State<LeaveManagementScreen> {
             onPressed: () => Navigator.pop(context),
           ),
           title: Text(
-            'Manajemen Cuti', 
+            'Manajemen Absensi', 
             style: TextStyle(color: textDarkBrown, fontWeight: FontWeight.w900, fontSize: 18),
           ),
           centerTitle: true,
@@ -301,32 +240,16 @@ class _LeaveManagementScreenState extends State<LeaveManagementScreen> {
                 _buildProfileHeader(),
                 const SizedBox(height: 24),
                 
-                AnimatedSize(
-                  duration: const Duration(milliseconds: 300),
-                  child: _selectedHistoryTab == 'Riwayat Cuti' 
-                      ? Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text('Pengajuan Cuti Baru', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w900, color: textDarkBrown)),
-                            const SizedBox(height: 12),
-                            _buildNewLeaveForm(),
-                            const SizedBox(height: 24),
-                            Center(
-                              child: Text('Riwayat Catatan', style: TextStyle(fontSize: 14, color: textDarkBrown, fontWeight: FontWeight.bold)),
-                            ),
-                            const SizedBox(height: 16),
-                          ],
-                        )
-                      : const SizedBox.shrink(),
+                // Judul Section Absensi
+                Text(
+                  'Riwayat Kehadiran', 
+                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.w900, color: textDarkBrown)
                 ),
-
-                _buildHistoryTabs(),
                 const SizedBox(height: 16),
                 
-                _selectedHistoryTab == 'Riwayat Cuti' 
-                    ? _buildLeaveHistory() 
-                    : _buildAttendanceHistory(),
-                    
+                // Menampilkan hanya Riwayat Absensi
+                _buildAttendanceHistory(),
+                
                 const SizedBox(height: 40),
               ],
             ),
@@ -350,18 +273,20 @@ class _LeaveManagementScreenState extends State<LeaveManagementScreen> {
             children: [
               const CircleAvatar(radius: 28, backgroundImage: NetworkImage('https://i.pravatar.cc/150?img=43')),
               const SizedBox(width: 16),
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text('Sarah Johnson', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w900, color: textDarkBrown)),
-                  Text('Terapis Senior', style: TextStyle(color: Colors.grey.shade500, fontSize: 14, fontWeight: FontWeight.w500)),
-                ],
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    // --- NAMA BERDASARKAN USER YANG LOGIN ---
+                    Text(_therapistName, style: TextStyle(fontSize: 18, fontWeight: FontWeight.w900, color: textDarkBrown)),
+                    Text('Terapis', style: TextStyle(color: Colors.grey.shade500, fontSize: 14, fontWeight: FontWeight.w500)),
+                  ],
+                ),
               ),
             ],
           ),
           const SizedBox(height: 20),
           
-          // Tahan render slider sampai memori berhasil ditarik agar tidak berkedip (flash)
           if (!_isDataLoaded)
             const SizedBox(
               height: 54, 
@@ -422,140 +347,6 @@ class _LeaveManagementScreenState extends State<LeaveManagementScreen> {
     );
   }
 
-  Widget _buildNewLeaveForm() {
-    return Container(
-      padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(
-        color: Colors.white, borderRadius: BorderRadius.circular(16),
-        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.04), blurRadius: 10, offset: const Offset(0, 4))],
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text('Jenis Cuti', style: TextStyle(fontSize: 12, color: Colors.grey.shade500, fontWeight: FontWeight.w600)),
-          DropdownButton<String>(
-            isExpanded: true, value: _selectedLeaveType,
-            underline: Container(height: 1, color: Colors.grey.shade300), 
-            icon: Icon(Icons.arrow_drop_down, color: textDarkBrown),
-            style: TextStyle(color: textDarkBrown, fontSize: 16, fontWeight: FontWeight.w600),
-            items: _leaveTypes.map((String value) => DropdownMenuItem<String>(value: value, child: Text(value))).toList(),
-            onChanged: (val) => setState(() => _selectedLeaveType = val!),
-          ),
-          const SizedBox(height: 20),
-          Row(
-            children: [
-              Expanded(child: _buildDateField('Tanggal Mulai', _formatDate(_startDate), () => _selectDate(context, isStart: true, isForFilter: false))),
-              const SizedBox(width: 16),
-              Expanded(child: _buildDateField('Tanggal Selesai', _formatDate(_endDate), () => _selectDate(context, isStart: false, isForFilter: false))),
-            ],
-          ),
-          const SizedBox(height: 20),
-          Text('Alasan', style: TextStyle(fontSize: 12, color: Colors.grey.shade500, fontWeight: FontWeight.w600)),
-          TextField(
-            controller: _reasonController, maxLines: 1, style: TextStyle(color: textDarkBrown, fontSize: 14),
-            decoration: InputDecoration(
-              hintText: 'Masukkan alasan di sini...', hintStyle: TextStyle(fontSize: 14, color: Colors.grey.shade400),
-              enabledBorder: UnderlineInputBorder(borderSide: BorderSide(color: Colors.grey.shade300)),
-              focusedBorder: UnderlineInputBorder(borderSide: BorderSide(color: primaryOrange)),
-              contentPadding: const EdgeInsets.symmetric(vertical: 8),
-            ),
-          ),
-          const SizedBox(height: 24),
-          SizedBox(
-            width: double.infinity,
-            child: ElevatedButton(
-              onPressed: _submitLeaveRequest, 
-              style: ElevatedButton.styleFrom(
-                backgroundColor: primaryOrange, elevation: 0,
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)), padding: const EdgeInsets.symmetric(vertical: 16),
-              ),
-              child: const Text('Kirim Pengajuan Cuti', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: 14)),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildHistoryTabs() {
-    return Row(
-      children: [
-        Expanded(
-          child: GestureDetector(
-            onTap: () => setState(() => _selectedHistoryTab = 'Riwayat Cuti'),
-            child: Container(
-              padding: const EdgeInsets.symmetric(vertical: 12),
-              decoration: BoxDecoration(
-                color: _selectedHistoryTab == 'Riwayat Cuti' ? primaryOrange : Colors.white,
-                borderRadius: BorderRadius.circular(20),
-                border: Border.all(color: _selectedHistoryTab == 'Riwayat Cuti' ? primaryOrange : Colors.grey.shade300),
-              ),
-              alignment: Alignment.center,
-              child: Text(
-                'Riwayat Cuti',
-                style: TextStyle(color: _selectedHistoryTab == 'Riwayat Cuti' ? Colors.white : textDarkBrown, fontWeight: FontWeight.w800, fontSize: 13),
-              ),
-            ),
-          ),
-        ),
-        const SizedBox(width: 12),
-        Expanded(
-          child: GestureDetector(
-            onTap: () => setState(() => _selectedHistoryTab = 'Riwayat Absensi'),
-            child: Container(
-              padding: const EdgeInsets.symmetric(vertical: 12),
-              decoration: BoxDecoration(
-                color: _selectedHistoryTab == 'Riwayat Absensi' ? primaryOrange : Colors.white,
-                borderRadius: BorderRadius.circular(20),
-                border: Border.all(color: _selectedHistoryTab == 'Riwayat Absensi' ? primaryOrange : Colors.grey.shade300),
-              ),
-              alignment: Alignment.center,
-              child: Text(
-                'Riwayat Absensi',
-                style: TextStyle(color: _selectedHistoryTab == 'Riwayat Absensi' ? Colors.white : textDarkBrown, fontWeight: FontWeight.w800, fontSize: 13),
-              ),
-            ),
-          ),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildLeaveHistory() {
-    return Column(
-      children: List.generate(_leaveHistory.length, (index) {
-        final item = _leaveHistory[index];
-        return Container(
-          margin: const EdgeInsets.only(bottom: 16), padding: const EdgeInsets.all(20),
-          decoration: BoxDecoration(
-            color: Colors.white, borderRadius: BorderRadius.circular(16),
-            boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.04), blurRadius: 10, offset: const Offset(0, 4))],
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Text(item['title'], style: TextStyle(fontWeight: FontWeight.w900, fontSize: 16, color: textDarkBrown)),
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-                    decoration: BoxDecoration(color: item['color'].withOpacity(0.15), borderRadius: BorderRadius.circular(12)),
-                    child: Text(item['status'], style: TextStyle(color: item['color'], fontWeight: FontWeight.w800, fontSize: 11)),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 12),
-              Text(item['date'], style: TextStyle(fontSize: 13, color: textDarkBrown.withOpacity(0.8), fontWeight: FontWeight.w500)),
-              const SizedBox(height: 4),
-              Text('Alasan: ${item['reason']}', style: TextStyle(fontSize: 13, color: Colors.grey.shade600)),
-            ],
-          ),
-        );
-      }),
-    );
-  }
-
   Widget _buildAttendanceHistory() {
     List<Map<String, dynamic>> filteredList = _attendanceHistory.where((item) {
       if (_filterStartDate == null && _filterEndDate == null) return true;
@@ -600,9 +391,9 @@ class _LeaveManagementScreenState extends State<LeaveManagementScreen> {
         const SizedBox(height: 12),
         Row(
           children: [
-            Expanded(child: _buildDateField('Pilih Tanggal', _formatDate(_filterStartDate), () => _selectDate(context, isStart: true, isForFilter: true))),
+            Expanded(child: _buildDateField('Pilih Tanggal', _formatDate(_filterStartDate), () => _selectDate(context, isStart: true))),
             const SizedBox(width: 12),
-            Expanded(child: _buildDateField('Pilih Tanggal', _formatDate(_filterEndDate), () => _selectDate(context, isStart: false, isForFilter: true))),
+            Expanded(child: _buildDateField('Pilih Tanggal', _formatDate(_filterEndDate), () => _selectDate(context, isStart: false))),
           ],
         ),
         const SizedBox(height: 24),

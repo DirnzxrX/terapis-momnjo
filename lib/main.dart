@@ -209,7 +209,7 @@ class _MainWrapperScreenState extends State<MainWrapperScreen> {
             BottomNavigationBarItem(
               icon: Icon(Icons.monetization_on_outlined),
               activeIcon: Icon(Icons.monetization_on),
-              label: 'Pendapatan',
+              label: 'Komisi',
             ),
             // Tab 4: Profil
             BottomNavigationBarItem(

@@ -1,7 +1,10 @@
+import 'dart:io'; // Untuk membaca File gambar
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart'; 
 import 'package:therapist_momnjo/data/api_service.dart';
 import 'package:intl/intl.dart';
+import 'package:image_picker/image_picker.dart'; // Tambahkan package ini
+import 'package:geolocator/geolocator.dart'; // Tambahkan package ini
 import 'pemeriksaan_screen.dart'; 
 
 class BookingDetailScreen extends StatefulWidget {
@@ -19,7 +22,10 @@ class _BookingDetailScreenState extends State<BookingDetailScreen> {
   bool _isInitialized = false;
   bool _isUpdatingStatus = false; 
   
+  // Variabel untuk menyimpan data Selfie & Lokasi
   String? _arrivalPhotoPath; 
+  Position? _currentPosition;
+  String _photoTimestamp = '';
 
   @override
   void didChangeDependencies() {
@@ -64,12 +70,13 @@ class _BookingDetailScreenState extends State<BookingDetailScreen> {
 
     setState(() { _isUpdatingStatus = true; });
     
-    // Panggil API (Pastikan fungsi updateBookingStatus sudah ada di api_service.dart)
+    // Panggil API
     final api = ApiService();
     final response = await api.updateBookingStatus(
       idBooking: bookingId, 
       newStatus: newStatus,
-      imagePath: _arrivalPhotoPath // Opsional: kirim path foto jika ada
+      imagePath: _arrivalPhotoPath, 
+      // Catatan: Jika backend Anda mendukung, Anda juga bisa mengirim _currentPosition?.latitude dll ke API di sini
     );
 
     if (mounted) {
@@ -83,7 +90,7 @@ class _BookingDetailScreenState extends State<BookingDetailScreen> {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text(response['message'] ?? 'Gagal update status server')),
         );
-        // Tetap paksa update lokal buat testing kalau API belum siap (Hapus nanti kalau prod)
+        // Tetap paksa update lokal buat testing (Hapus saat ke Production)
         setState(() {
           _currentStatus = newStatus;
           _data?['booking_status'] = newStatus; 
@@ -92,80 +99,165 @@ class _BookingDetailScreenState extends State<BookingDetailScreen> {
     }
   }
 
-  Future<void> _pickImage(StateSetter setDialogState) async {
-    // TODO: Ganti dengan ImagePicker beneran nanti
-    await Future.delayed(const Duration(milliseconds: 500));
-    setDialogState(() {
-      _arrivalPhotoPath = "captured_image_simulated.png"; 
-    });
+  // --- FUNGSI OTOMATIS AMBIL LOKASI DAN BUKA KAMERA ---
+  Future<void> _captureSelfieAndLocation() async {
+    setState(() => _isUpdatingStatus = true); // Efek loading saat mencari GPS
+
+    try {
+      // 1. Cek Layanan Lokasi dan Izin
+      bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
+      if (!serviceEnabled) {
+        throw Exception('GPS tidak aktif. Mohon nyalakan lokasi Anda.');
+      }
+
+      LocationPermission permission = await Geolocator.checkPermission();
+      if (permission == LocationPermission.denied) {
+        permission = await Geolocator.requestPermission();
+        if (permission == LocationPermission.denied) {
+          throw Exception('Izin lokasi ditolak.');
+        }
+      }
+      if (permission == LocationPermission.deniedForever) {
+        throw Exception('Izin lokasi ditolak secara permanen. Silakan atur di Setting HP.');
+      }
+
+      // 2. Dapatkan Koordinat Saat Ini
+      Position position = await Geolocator.getCurrentPosition(
+        desiredAccuracy: LocationAccuracy.high,
+      );
+
+      // 3. Buka Kamera Depan (Selfie)
+      final ImagePicker picker = ImagePicker();
+      final XFile? photo = await picker.pickImage(
+        source: ImageSource.camera,
+        preferredCameraDevice: CameraDevice.front, // Memaksa kamera depan
+      );
+
+      if (photo != null) {
+        if (!mounted) return; // Mencegah error context hilang saat kembali dari kamera
+
+        setState(() {
+          _arrivalPhotoPath = photo.path;
+          _currentPosition = position;
+          _photoTimestamp = DateFormat('dd MMM yyyy, HH:mm:ss').format(DateTime.now());
+        });
+        
+        // 4. Jika berhasil, tampilkan Dialog Konfirmasi
+        _showArrivalPhotoDialog();
+      }
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(e.toString()), backgroundColor: Colors.red),
+      );
+    } finally {
+      if (mounted) {
+        setState(() => _isUpdatingStatus = false);
+      }
+    }
   }
 
+  // --- DIALOG UNTUK PREVIEW FOTO + WATERMARK (TIMESTAMP & GEOLOKASI) ---
   void _showArrivalPhotoDialog() {
-    _arrivalPhotoPath = null;
     showDialog(
       context: context,
       barrierDismissible: false,
       builder: (context) {
-        return StatefulBuilder(
-          builder: (context, setDialogState) {
-            return AlertDialog(
-              title: const Text('Konfirmasi Kedatangan', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-              content: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  const Text('Silakan upload foto bukti kedatangan di lokasi (Home Service).', style: TextStyle(fontSize: 13, color: Colors.black54)),
-                  const SizedBox(height: 20),
-                  GestureDetector(
-                    onTap: () => _pickImage(setDialogState),
-                    child: Container(
-                      height: 180, width: double.infinity,
-                      decoration: BoxDecoration(
-                        color: _arrivalPhotoPath != null ? Colors.green.withOpacity(0.05) : Colors.grey.shade100,
-                        borderRadius: BorderRadius.circular(16),
-                        border: Border.all(color: _arrivalPhotoPath != null ? Colors.green : Colors.grey.shade300, width: 2),
-                      ),
-                      child: _arrivalPhotoPath != null 
-                        ? Column(
-                            mainAxisAlignment: MainAxisAlignment.center,
+        return AlertDialog(
+          title: const Text('Konfirmasi Kedatangan', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+          contentPadding: const EdgeInsets.all(20),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Text('Pastikan wajah, lokasi, dan waktu sudah sesuai sebelum dikirim.', style: TextStyle(fontSize: 13, color: Colors.black54)),
+              const SizedBox(height: 16),
+              
+              // Frame Foto dengan Overlay Data
+              if (_arrivalPhotoPath != null)
+                SizedBox(
+                  width: MediaQuery.of(context).size.width, // Memaksa batas layout agar render box memiliki ukuran pasti
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(16),
+                    child: Stack(
+                      alignment: Alignment.bottomLeft,
+                      children: [
+                        // Preview Gambar
+                        Image.file(
+                          File(_arrivalPhotoPath!), 
+                          height: 300, 
+                          width: double.maxFinite, // Menggunakan maxFinite sebagai ganti infinity
+                          fit: BoxFit.cover
+                        ),
+                        // Overlay Timestamp & Geolokasi
+                        Container(
+                          width: double.maxFinite, // Menggunakan maxFinite sebagai ganti infinity
+                          color: Colors.black.withOpacity(0.6), // Background transparan
+                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            mainAxisSize: MainAxisSize.min,
                             children: [
-                              Container(padding: const EdgeInsets.all(12), decoration: const BoxDecoration(color: Colors.green, shape: BoxShape.circle), child: const Icon(Icons.check, color: Colors.white, size: 30)),
-                              const SizedBox(height: 12),
-                              const Text('Foto Diambil', style: TextStyle(color: Colors.green, fontWeight: FontWeight.bold, fontSize: 15)),
-                            ],
-                          )
-                        : Column(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            children: [
-                              Container(padding: const EdgeInsets.all(12), decoration: BoxDecoration(color: primaryPink.withOpacity(0.1), shape: BoxShape.circle), child: Icon(Icons.camera_alt, color: primaryPink, size: 32)),
-                              const SizedBox(height: 12),
-                              Text('Ambil Foto', style: TextStyle(color: primaryPink, fontWeight: FontWeight.bold, fontSize: 15)),
+                              Row(
+                                children: [
+                                  const Icon(Icons.access_time, color: Colors.white, size: 14),
+                                  const SizedBox(width: 4),
+                                  Text(_photoTimestamp, style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold)),
+                                ],
+                              ),
+                              const SizedBox(height: 4),
+                              Row(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  const Icon(Icons.location_on, color: Colors.white, size: 14),
+                                  const SizedBox(width: 4),
+                                  Expanded(
+                                    child: Text(
+                                      'Lat: ${_currentPosition?.latitude}\nLng: ${_currentPosition?.longitude}', 
+                                      style: const TextStyle(color: Colors.white70, fontSize: 11, height: 1.3),
+                                    ),
+                                  ),
+                                ],
+                              ),
                             ],
                           ),
+                        ),
+                      ],
                     ),
                   ),
-                ],
-              ),
-              actions: [
-                Row(
-                  children: [
-                    Expanded(child: TextButton(onPressed: () => Navigator.pop(context), child: Text('Batal', style: TextStyle(color: Colors.grey.shade600, fontWeight: FontWeight.bold)))),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: ElevatedButton(
-                        onPressed: _arrivalPhotoPath == null ? null : () async {
-                          Navigator.pop(context); 
-                          await _updateStatusAPI('Arrived'); 
-                        },
-                        style: ElevatedButton.styleFrom(backgroundColor: primaryPink, disabledBackgroundColor: Colors.grey.shade300, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)), elevation: 0),
-                        child: const Text('Kirim Foto', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
-                      ),
+                ),
+            ],
+          ),
+          actions: [
+            Row(
+              children: [
+                Expanded(
+                  child: TextButton(
+                    onPressed: () {
+                      setState(() { _arrivalPhotoPath = null; });
+                      Navigator.pop(context);
+                    }, 
+                    child: Text('Ulangi', style: TextStyle(color: Colors.grey.shade600, fontWeight: FontWeight.bold))
+                  )
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: ElevatedButton(
+                    onPressed: () async {
+                      Navigator.pop(context); 
+                      await _updateStatusAPI('Arrived'); 
+                    },
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: primaryPink, 
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)), 
+                      elevation: 0
                     ),
-                  ],
+                    child: const Text('Kirim', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                  ),
                 ),
               ],
-            );
-          },
+            ),
+          ],
         );
       },
     );
@@ -230,7 +322,6 @@ class _BookingDetailScreenState extends State<BookingDetailScreen> {
     );
   }
 
-  // --- WIDGET BUILDERS (Sama seperti sebelumnya) ---
   Widget _buildProfileCard(String nama, String telepon, String status) {
     Color statusBg;
     switch (status.toLowerCase()) {
@@ -425,7 +516,6 @@ class _BookingDetailScreenState extends State<BookingDetailScreen> {
 
     if (s == 'arrived') {
       return _buildSingleActionButton('PEMERIKSAAN KLIEN', () async {
-        // Melempar ID Customer sesuai dokumen API ke PemeriksaanScreen
         await Navigator.push(context, MaterialPageRoute(builder: (context) => PemeriksaanScreen(bookingData: _data)));
         await _updateStatusAPI('Pemeriksaan'); 
       });
@@ -441,7 +531,6 @@ class _BookingDetailScreenState extends State<BookingDetailScreen> {
     if (s == 'started') {
       return _buildSingleActionButton('SELESAIKAN KUNJUNGAN', () async {
         await _updateStatusAPI('Closed');
-        // Langsung masuk ke Layanan Laporan Kunjungan (rate_customer.php)
         if (mounted) Navigator.pushReplacementNamed(context, '/visit_report', arguments: _data);
       });
     }
@@ -462,9 +551,12 @@ class _BookingDetailScreenState extends State<BookingDetailScreen> {
             Expanded(
               flex: 2,
               child: ElevatedButton.icon(
-                onPressed: _showArrivalPhotoDialog,
-                icon: const Icon(Icons.camera_alt, color: Colors.white, size: 20),
-                label: const Text('ARRIVED', style: TextStyle(fontWeight: FontWeight.bold, color: Colors.white)),
+                // Mengubah aksi tombol ARRIVED ke fungsi ambil selfie & GPS
+                onPressed: _isUpdatingStatus ? null : _captureSelfieAndLocation,
+                icon: _isUpdatingStatus 
+                    ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white)) 
+                    : const Icon(Icons.camera_alt, color: Colors.white, size: 20),
+                label: Text(_isUpdatingStatus ? 'MENUNGGU GPS...' : 'ARRIVED', style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.white)),
                 style: ElevatedButton.styleFrom(backgroundColor: Colors.green, padding: const EdgeInsets.symmetric(vertical: 16), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16))),
               ),
             ),

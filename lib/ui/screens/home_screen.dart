@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:intl/intl.dart'; 
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:therapist_momnjo/data/api_service.dart';
 
@@ -15,7 +16,6 @@ class _HomeScreenState extends State<HomeScreen> {
   String _fotoProfile = ''; 
   int _bookingHariIni = 0;
   int _selesai = 0;
-  String _pendapatan = 'Rp 0'; 
   Map<String, dynamic>? _nextBooking;
   bool _isLoading = true;
 
@@ -50,38 +50,42 @@ class _HomeScreenState extends State<HomeScreen> {
       }
       
       final api = ApiService();
-      final statsResponse = await api.getStats();
       
-      int daily = 0;
-      int completed = 0;
-      String incomeFormat = 'Rp 0';
+      // Mengambil tanggal hari ini untuk filter data
+      final String todayStr = DateFormat('yyyy-MM-dd').format(DateTime.now());
+      int todayJobsCount = 0;
+      int todayHistoryCount = 0;
 
-      if (statsResponse['success'] == true && statsResponse['data'] != null) {
-        daily = statsResponse['data']['total_bookings'] ?? 0;
-        completed = statsResponse['data']['completed_jobs'] ?? 0;
-        
-        int rawIncome = statsResponse['data']['pendapatan'] ?? 0;
-        incomeFormat = 'Rp ${rawIncome.toString().replaceAllMapped(RegExp(r'(\d{1,3})(?=(\d{3})+(?!\d))'), (Match m) => '${m[1]}.')}';
-      }
-
-      final jobsResponse = await api.getJobs();
+      // 1. FETCH JOBS (Tugas Aktif) - Gunakan getActiveJobs agar sinkron dengan Schedule Screen
+      final jobsResponse = await api.getActiveJobs(); 
       Map<String, dynamic>? nextBook;
       List<Map<String, String>> newNotifs = [];
       bool hasNewNotif = false;
       
       if (jobsResponse['success'] == true && jobsResponse['data'] != null) {
         List jobs = jobsResponse['data'];
+        List openJobs = [];
         
-        List openJobs = jobs.where((job) {
+        for (var job in jobs) {
           final String status = (job['status'] ?? job['booking_status'] ?? '').toString().toLowerCase().trim();
-          return !['close', 'closed', 'completed'].contains(status);
-        }).toList();
+          final String startTime = job['start_time']?.toString() ?? '';
+          
+          // Hitung booking hari ini (berdasarkan waktu mulai yang mengandung tanggal hari ini)
+          if (startTime.startsWith(todayStr)) {
+            todayJobsCount++;
+          }
+
+          if (!['close', 'closed', 'completed'].contains(status)) {
+            openJobs.add(job);
+          }
+        }
 
         if (openJobs.isNotEmpty) {
           openJobs.sort((a, b) {
             DateTime timeA = DateTime.tryParse(a['start_time']?.toString() ?? '') ?? DateTime(2000);
             DateTime timeB = DateTime.tryParse(b['start_time']?.toString() ?? '') ?? DateTime(2000);
-            return timeB.compareTo(timeA); 
+            // Ubah jadi Ascending agar tugas yang paling dekat waktunya muncul duluan
+            return timeA.compareTo(timeB); 
           });
 
           nextBook = openJobs.first; 
@@ -100,14 +104,27 @@ class _HomeScreenState extends State<HomeScreen> {
         }
       }
 
+      // 2. FETCH HISTORY (Riwayat Selesai)
+      final historyResponse = await api.getHistoryList();
+      if (historyResponse['status'] == 'success' || historyResponse['success'] == true) {
+         List historyList = historyResponse['data'] ?? [];
+         for(var item in historyList) {
+            // Cek berbagai kemungkinan nama field tanggal dari backend
+            String tgl = item['tgl_dokumen'] ?? item['tgl_transaksi'] ?? item['date'] ?? '';
+            // Jika tanggal history sama dengan hari ini, tambahkan ke counter Selesai
+            if (tgl.startsWith(todayStr)) {
+               todayHistoryCount++;
+            }
+         }
+      }
+
       if (mounted) {
         setState(() {
           _namaTerapis = namaTampil;
           _fotoProfile = fotoSimpanan ?? '';
           _isOnDuty = isOnDutySimpanan; 
-          _bookingHariIni = daily;
-          _selesai = completed;
-          _pendapatan = incomeFormat;
+          _bookingHariIni = todayJobsCount;
+          _selesai = todayHistoryCount;
           _nextBooking = nextBook;
           
           _notifications = newNotifs;
@@ -120,6 +137,20 @@ class _HomeScreenState extends State<HomeScreen> {
       debugPrint("Error load data: $e");
       if (mounted) setState(() => _isLoading = false);
     }
+  }
+
+  // 🔥 FUNGSI UNTUK MENGUBAH STATUS KERJA
+  Future<void> _toggleDutyStatus(bool value) async {
+    setState(() {
+      _isOnDuty = value;
+    });
+    
+    // Simpan ke memori lokal
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('is_on_duty', value);
+
+    // TODO: Jika nanti ada API untuk kirim status absensi ke Backend PHP, panggil di sini
+    // contoh: await ApiService().updateStatusAbsensi(value ? 'on' : 'off');
   }
 
   String _formatTime(String? rawTime) {
@@ -258,6 +289,8 @@ class _HomeScreenState extends State<HomeScreen> {
                   const SizedBox(height: 24),
                   _buildStatusCard(),
                   const SizedBox(height: 24),
+                  
+                  // RINGKASAN HARI INI
                   Text(
                     'Ringkasan Hari Ini',
                     style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: textDarkBrown),
@@ -265,19 +298,71 @@ class _HomeScreenState extends State<HomeScreen> {
                   const SizedBox(height: 12),
                   _buildSummarySection(),
                   const SizedBox(height: 24),
+                  
+                  // TUGAS BERIKUTNYA
                   Text(
                     'Tugas Berikutnya',
                     style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: textDarkBrown),
                   ),
                   const SizedBox(height: 12),
-                  _buildNextBookingCard(context),
+                  if (_isLoading)
+                    const Center(child: CircularProgressIndicator())
+                  else if (_nextBooking != null)
+                    _buildNextBookingCard(context)
+                  else
+                    // Muncul jika di jadwal memang tidak ada tugas aktif
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.symmetric(vertical: 24, horizontal: 20),
+                      decoration: BoxDecoration(
+                        color: Colors.white,
+                        borderRadius: BorderRadius.circular(16),
+                        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.04), blurRadius: 10, offset: const Offset(0, 4))],
+                      ),
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Icon(Icons.event_available, size: 40, color: Colors.grey.shade300),
+                          const SizedBox(height: 12),
+                          Text(
+                            'Belum ada pekerjaan',
+                            style: TextStyle(color: Colors.grey.shade500, fontWeight: FontWeight.w500),
+                          ),
+                        ],
+                      ),
+                    ),
                   const SizedBox(height: 24),
-                  Text(
-                    'Aksi Cepat',
-                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: textDarkBrown),
+                  
+                  // BANNER GAMBAR PENGGANTI AKSI CEPAT
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(16),
+                    child: Image.asset(
+                      'assets/gambar1.jpeg', 
+                      width: double.infinity,
+                      height: 220,
+                      fit: BoxFit.cover,
+                      errorBuilder: (context, error, stackTrace) {
+                        return Container(
+                          width: double.infinity,
+                          height: 220,
+                          decoration: BoxDecoration(
+                            color: Colors.grey.shade200,
+                            borderRadius: BorderRadius.circular(16)
+                          ),
+                          child: Column(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Icon(Icons.image_outlined, size: 40, color: Colors.grey.shade400),
+                              const SizedBox(height: 8),
+                              Text('Siapkan gambar di assets/gambar1.jpeg', 
+                                style: TextStyle(color: Colors.grey.shade500, fontSize: 12)
+                              ),
+                            ],
+                          ),
+                        );
+                      }
+                    ),
                   ),
-                  const SizedBox(height: 12),
-                  _buildQuickActions(context), 
                   const SizedBox(height: 30),
                 ],
               ),
@@ -338,11 +423,8 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
+  // 🔥 UPDATE: Tampilan Status Kerja Baru Sesuai Referensi Gambar (Tombol Kapsul & Jam Besar)
   Widget _buildStatusCard() {
-    Color badgeColor = _isOnDuty ? const Color(0xFFE8F5E9) : Colors.grey.shade200;
-    Color textColor = _isOnDuty ? const Color(0xFF4CAF50) : Colors.grey.shade600;
-    String statusText = _isOnDuty ? 'ON DUTY' : 'OFF DUTY';
-
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
@@ -351,26 +433,91 @@ class _HomeScreenState extends State<HomeScreen> {
         borderRadius: BorderRadius.circular(16),
         boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.04), blurRadius: 10, offset: const Offset(0, 4))],
       ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Text('Status Kerja', style: TextStyle(fontSize: 13, color: textDarkBrown.withOpacity(0.8), fontWeight: FontWeight.w500)),
-              Text('Ubah di menu Absensi', style: TextStyle(fontSize: 10, color: Colors.grey.shade400, fontStyle: FontStyle.italic)),
-            ],
+          // KIRI: Label Status Kerja, Tombol Pill ON/OFF DUTY, dan Jam
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('Status Kerja', style: TextStyle(fontSize: 14, color: textDarkBrown.withOpacity(0.7), fontWeight: FontWeight.w500)),
+                const SizedBox(height: 10),
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.center,
+                  children: [
+                    // Tombol Kapsul (Pill) untuk mengganti status
+                    GestureDetector(
+                      onTap: () => _toggleDutyStatus(!_isOnDuty),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+                        decoration: BoxDecoration(
+                          color: _isOnDuty ? const Color(0xFFE8F5E9) : Colors.grey.shade200,
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: Text(
+                          _isOnDuty ? 'ON DUTY' : 'OFF DUTY', 
+                          style: TextStyle(
+                            color: _isOnDuty ? const Color(0xFF4CAF50) : Colors.grey.shade600, 
+                            fontWeight: FontWeight.bold, 
+                            fontSize: 11,
+                            letterSpacing: 0.5,
+                          )
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 14),
+                    // Jam Kerja (Besar dan Tebal)
+                    Text('08.00 - 17.00', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w900, color: textDarkBrown)),
+                  ],
+                ),
+              ],
+            ),
           ),
-          const SizedBox(height: 12),
+          
+          // KANAN: Tombol Absensi & Chat Admin (Tetap Dipertahankan)
           Row(
             children: [
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                decoration: BoxDecoration(color: badgeColor, borderRadius: BorderRadius.circular(8)),
-                child: Text(statusText, style: TextStyle(color: textColor, fontWeight: FontWeight.w800, fontSize: 11)),
+              GestureDetector(
+                onTap: () {
+                  Navigator.pushNamed(context, '/leave_management').then((_) {
+                    _loadData();
+                  });
+                },
+                child: Column(
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.all(10),
+                      decoration: BoxDecoration(
+                        color: primaryPeach.withOpacity(0.15),
+                        shape: BoxShape.circle,
+                      ),
+                      child: Icon(Icons.assignment_turned_in, color: primaryPeach, size: 20),
+                    ),
+                    const SizedBox(height: 6),
+                    Text('Absensi', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: textDarkBrown)),
+                  ],
+                ),
               ),
               const SizedBox(width: 16),
-              Text('08.00 - 17.00', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w900, color: textDarkBrown)),
+              
+              GestureDetector(
+                onTap: () => Navigator.pushNamed(context, '/chat_admin'),
+                child: Column(
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.all(10),
+                      decoration: BoxDecoration(
+                        color: primaryPeach.withOpacity(0.15),
+                        shape: BoxShape.circle,
+                      ),
+                      child: Icon(Icons.chat_bubble_outline, color: primaryPeach, size: 20),
+                    ),
+                    const SizedBox(height: 6),
+                    Text('Chat Admin', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: textDarkBrown)),
+                  ],
+                ),
+              ),
             ],
           ),
         ],
@@ -388,19 +535,11 @@ class _HomeScreenState extends State<HomeScreen> {
             textDarkBrown,
           ),
         ),
-        const SizedBox(width: 12),
+        const SizedBox(width: 16),
         Expanded(
           child: _buildSummaryCard(
             _isLoading ? '...' : _selesai.toString(), 
             'Selesai', 
-            textDarkBrown,
-          ),
-        ),
-        const SizedBox(width: 12),
-        Expanded(
-          child: _buildSummaryCard(
-            _isLoading ? '...' : _pendapatan, 
-            'Pendapatan', 
             goldBrown,
           ),
         ),
@@ -422,39 +561,16 @@ class _HomeScreenState extends State<HomeScreen> {
         children: [
           FittedBox(
             fit: BoxFit.scaleDown,
-            child: Text(value, style: TextStyle(fontSize: 24, fontWeight: FontWeight.w900, color: valueColor)),
+            child: Text(value, style: TextStyle(fontSize: 32, fontWeight: FontWeight.w900, color: valueColor)),
           ),
           const SizedBox(height: 8),
-          Text(label, textAlign: TextAlign.center, style: TextStyle(fontSize: 11, color: textDarkBrown.withOpacity(0.8), fontWeight: FontWeight.w500)),
+          Text(label, textAlign: TextAlign.center, style: TextStyle(fontSize: 12, color: textDarkBrown.withOpacity(0.8), fontWeight: FontWeight.w500)),
         ],
       ),
     );
   }
 
   Widget _buildNextBookingCard(BuildContext context) {
-    if (_isLoading) {
-      return Container(
-        padding: const EdgeInsets.all(24),
-        alignment: Alignment.center,
-        decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(16)),
-        child: CircularProgressIndicator(color: primaryPeach),
-      );
-    }
-
-    if (_nextBooking == null) {
-      return Container(
-        padding: const EdgeInsets.all(20),
-        decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(16),
-          boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.04), blurRadius: 10, offset: const Offset(0, 4))],
-        ),
-        child: Center(
-          child: Text('Belum ada tugas berikutnya', style: TextStyle(color: Colors.grey.shade500)),
-        ),
-      );
-    }
-
     final rawJam = _nextBooking?['start_time']?.toString() ?? '--:--';
     final jam = _formatTime(rawJam); 
     final namaKlien = _nextBooking?['customer_name'] ?? 'Klien';
@@ -524,63 +640,6 @@ class _HomeScreenState extends State<HomeScreen> {
             ),
           )
         ],
-      ),
-    );
-  }
-
-  Widget _buildQuickActions(BuildContext context) {
-    return Column(
-      children: [
-        _buildActionItem(
-          Icons.history, 
-          'Laporan Kunjungan', 
-          onTap: () => Navigator.pushNamed(context, '/history_laporan')
-        ),
-        const SizedBox(height: 12),
-        _buildActionItem(
-          Icons.assignment_turned_in, 
-          'Absensi', 
-          onTap: () {
-            Navigator.pushNamed(context, '/leave_management').then((_) {
-              _loadData();
-            });
-          }
-        ),
-        const SizedBox(height: 12),
-        _buildActionItem(
-          Icons.chat_bubble_outline, 
-          'Chat Admin', 
-          onTap: () => Navigator.pushNamed(context, '/chat_admin')
-        ),
-      ],
-    );
-  }
-
-  Widget _buildActionItem(IconData icon, String label, {VoidCallback? onTap}) {
-    return GestureDetector(
-      onTap: onTap, 
-      child: Container(
-        width: double.infinity,
-        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
-        decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(16),
-          boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.03), blurRadius: 8, offset: const Offset(0, 4))],
-        ),
-        child: Row(
-          children: [
-            Container(
-              padding: const EdgeInsets.all(8),
-              decoration: BoxDecoration(
-                color: textDarkBrown.withOpacity(0.1),
-                borderRadius: BorderRadius.circular(10),
-              ),
-              child: Icon(icon, color: textDarkBrown, size: 20),
-            ),
-            const SizedBox(width: 16),
-            Text(label, style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: textDarkBrown)),
-          ],
-        ),
       ),
     );
   }
