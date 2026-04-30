@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart'; // WAJIB untuk TextInputFormatter
+import 'package:flutter/services.dart'; 
+import 'package:therapist_momnjo/data/api_service.dart'; 
 
 class RequestPayoutScreen extends StatefulWidget {
   const RequestPayoutScreen({Key? key}) : super(key: key);
@@ -15,6 +16,7 @@ class _RequestPayoutScreenState extends State<RequestPayoutScreen> {
   final Color primaryPink = const Color(0xFFE8647C); 
 
   // --- STATE FORM ---
+  String _selectedJenisPayout = 'treatment'; // Default ke saldo treatment
   String? _selectedBank;
   final List<String> _bankList = ['BCA', 'Mandiri', 'BNI', 'BRI', 'BSI', 'CIMB Niaga'];
   
@@ -26,11 +28,16 @@ class _RequestPayoutScreenState extends State<RequestPayoutScreen> {
   bool _isConfirmed = false;
   String _displayAmount = 'Rp 0';
 
+  // --- STATE API ---
+  bool _isLoadingBalance = true;
+  bool _isSubmitting = false;
+  int _availableBalance = 0; 
+
   @override
   void initState() {
     super.initState();
-    // Listener ini sekarang diuntungkan oleh Formatter kita,
-    // karena _amountController.text sudah otomatis mengandung titik (e.g., "1.500.000")
+    _fetchBalance(); // Menarik data saldo asli dari API
+
     _amountController.addListener(() {
       setState(() {
         if (_amountController.text.trim().isEmpty) {
@@ -51,7 +58,51 @@ class _RequestPayoutScreenState extends State<RequestPayoutScreen> {
     super.dispose();
   }
 
-  void _submitPayout() {
+  // --- FUNGSI MENGAMBIL SALDO ASLI DARI API ---
+  Future<void> _fetchBalance() async {
+    try {
+      final api = ApiService();
+      final response = await api.getBalance(); 
+
+      if (mounted) {
+        setState(() {
+          if ((response['success'] == true || response['status'] == 'success') && response['data'] != null) {
+            // Sesuai dokumentasi backend, key sekarang adalah 'total_balance_keseluruhan'
+            double rawBalance = double.tryParse(response['data']['total_balance_keseluruhan'].toString()) ?? 0.0;
+            _availableBalance = rawBalance.toInt();
+          }
+          _isLoadingBalance = false;
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _isLoadingBalance = false;
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Gagal memuat saldo. Periksa koneksi Anda.')),
+        );
+      }
+    }
+  }
+
+  // --- FUNGSI FORMAT RUPIAH MANUAL ---
+  String _formatRupiah(int value) {
+    String number = value.toString();
+    String result = '';
+    int count = 0;
+    for (int i = number.length - 1; i >= 0; i--) {
+      result = number[i] + result;
+      count++;
+      if (count % 3 == 0 && i > 0) {
+        result = '.$result';
+      }
+    }
+    return 'Rp $result';
+  }
+
+  // --- FUNGSI SUBMIT REQUEST PAYOUT KE API ---
+  Future<void> _submitPayout() async {
     if (_amountController.text.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Harap masukkan nominal penarikan!')));
       return;
@@ -69,29 +120,85 @@ class _RequestPayoutScreenState extends State<RequestPayoutScreen> {
       return;
     }
 
-    // 🚨 PERINGATAN LOGIKA BACKEND:
-    // Karena kita memakai formatter titik (1.500.000), sebelum dikirim ke API/Backend,
-    // Anda WAJIB membersihkan titiknya menjadi integer murni, contoh:
-    // String rawAmount = _amountController.text.replaceAll('.', '');
-    // int amountToSubmit = int.parse(rawAmount);
+    // Membersihkan format titik menjadi integer murni untuk dikirim ke API
+    String rawAmount = _amountController.text.replaceAll('.', '');
+    int amountToSubmit = int.tryParse(rawAmount) ?? 0;
 
-    showDialog(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Berhasil'),
-        content: const Text('Permintaan penarikan dana Anda telah masuk antrean proses.'),
-        actions: [
-          ElevatedButton(
-            onPressed: () {
-              Navigator.pop(ctx); 
-              Navigator.pop(context, true); 
-            },
-            style: ElevatedButton.styleFrom(backgroundColor: primaryPink),
-            child: const Text('OK'),
-          )
-        ],
-      ),
-    );
+    // Validasi Saldo Cukup (Sementara validasi secara global, backend akan menolak jika saldo jenis spesifik tidak cukup)
+    if (amountToSubmit > _availableBalance) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: const Text('Saldo Anda tidak mencukupi untuk nominal ini!'),
+          backgroundColor: Colors.red.shade400,
+        )
+      );
+      return;
+    }
+
+    setState(() {
+      _isSubmitting = true;
+    });
+
+    try {
+      final api = ApiService();
+      // 🔥 FIX: Menambahkan parameter jenisPayout yang diwajibkan
+      final response = await api.submitPayoutRequest(
+        jenisPayout: _selectedJenisPayout, 
+        amount: amountToSubmit,
+        bank: _selectedBank!,
+        accountNumber: _accountNumberController.text.trim(),
+        accountName: _accountNameController.text.trim(),
+        notes: _notesController.text.trim(),
+      );
+
+      if (!mounted) return;
+
+      if (response['success'] == true || response['status'] == 'success') {
+        showDialog(
+          context: context,
+          barrierDismissible: false,
+          builder: (ctx) => AlertDialog(
+            title: const Text('Berhasil', style: TextStyle(fontWeight: FontWeight.bold)),
+            content: const Text('Permintaan penarikan dana Anda telah masuk antrean proses.'),
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+            actions: [
+              ElevatedButton(
+                onPressed: () {
+                  Navigator.pop(ctx); 
+                  Navigator.pop(context, true); // Kembali & beri tanda bahwa request sukses
+                },
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: primaryPink,
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8))
+                ),
+                child: const Text('OK', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+              )
+            ],
+          ),
+        );
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(response['message'] ?? 'Gagal mengirim permintaan payout.'),
+            backgroundColor: Colors.red.shade400,
+          ),
+        );
+      }
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: const Text('Terjadi kesalahan. Periksa koneksi internet Anda.'),
+          backgroundColor: Colors.red.shade400,
+        ),
+      );
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isSubmitting = false;
+        });
+      }
+    }
   }
 
   @override
@@ -117,12 +224,6 @@ class _RequestPayoutScreenState extends State<RequestPayoutScreen> {
             style: TextStyle(color: textDarkBrown, fontSize: 20, fontWeight: FontWeight.w900),
           ),
           centerTitle: true,
-          actions: [
-            IconButton(
-              icon: Icon(Icons.history, color: textDarkBrown),
-              onPressed: () {},
-            ),
-          ],
         ),
         body: GestureDetector(
           onTap: () => FocusScope.of(context).unfocus(),
@@ -134,12 +235,16 @@ class _RequestPayoutScreenState extends State<RequestPayoutScreen> {
                 _buildBalanceCard(),
                 const SizedBox(height: 24),
                 
-                // IMPLEMENTASI FORMATTER DAN PERMANENT PREFIX
+                // 🔥 TAMBAHAN BARU: Dropdown Sumber Saldo
+                Text('Sumber Saldo', style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: textDarkBrown)),
+                const SizedBox(height: 8),
+                _buildJenisPayoutDropdown(),
+                const SizedBox(height: 20),
+                
                 _buildInputField(
                   label: 'Amount',
                   hint: 'Masukkan nominal',
                   controller: _amountController,
-                  // Menggunakan Widget statis agar "Rp" selalu muncul dari awal tanpa menunggu fokus
                   prefixWidget: Padding(
                     padding: const EdgeInsets.only(left: 16, right: 8, top: 14, bottom: 14),
                     child: Text(
@@ -148,7 +253,6 @@ class _RequestPayoutScreenState extends State<RequestPayoutScreen> {
                     ),
                   ),
                   keyboardType: TextInputType.number,
-                  // Memanggil formatter kustom yang kita buat di bawah
                   inputFormatters: [CurrencyFormat()], 
                 ),
                 const SizedBox(height: 20),
@@ -160,7 +264,7 @@ class _RequestPayoutScreenState extends State<RequestPayoutScreen> {
 
                 _buildInputField(
                   label: 'Account Number',
-                  hint: 'Account Number',
+                  hint: 'Nomor Rekening',
                   controller: _accountNumberController,
                   keyboardType: TextInputType.number,
                 ),
@@ -168,14 +272,14 @@ class _RequestPayoutScreenState extends State<RequestPayoutScreen> {
 
                 _buildInputField(
                   label: 'Account Holder Name',
-                  hint: 'Account Holder Name',
+                  hint: 'Nama Pemilik Rekening',
                   controller: _accountNameController,
                 ),
                 const SizedBox(height: 20),
 
                 _buildInputField(
                   label: 'Notes (Optional)',
-                  hint: 'Notes (Optional)',
+                  hint: 'Catatan tambahan',
                   controller: _notesController,
                   maxLines: 3,
                 ),
@@ -218,10 +322,50 @@ class _RequestPayoutScreenState extends State<RequestPayoutScreen> {
         children: [
           Text('Available Balance', style: TextStyle(color: textDarkBrown.withOpacity(0.8), fontSize: 13, fontWeight: FontWeight.w600)),
           const SizedBox(height: 8),
-          Text('Rp 2.350.000', style: TextStyle(color: textDarkBrown, fontSize: 32, fontWeight: FontWeight.w900)),
+          
+          // Indikator loading atau nominal asli
+          _isLoadingBalance
+              ? const SizedBox(
+                  height: 38,
+                  width: 38,
+                  child: CircularProgressIndicator(strokeWidth: 3),
+                )
+              : Text(_formatRupiah(_availableBalance), style: TextStyle(color: textDarkBrown, fontSize: 32, fontWeight: FontWeight.w900)),
+          
           const SizedBox(height: 4),
           Text('Withdrawable Today', style: TextStyle(color: textDarkBrown.withOpacity(0.7), fontSize: 12, fontWeight: FontWeight.w500)),
         ],
+      ),
+    );
+  }
+
+  // Widget baru untuk Dropdown Jenis Saldo
+  Widget _buildJenisPayoutDropdown() {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Colors.grey.shade300),
+      ),
+      child: DropdownButtonHideUnderline(
+        child: DropdownButton<String>(
+          isExpanded: true,
+          value: _selectedJenisPayout,
+          icon: Icon(Icons.keyboard_arrow_down, color: textDarkBrown),
+          style: TextStyle(color: textDarkBrown, fontWeight: FontWeight.w600, fontSize: 15),
+          items: const [
+            DropdownMenuItem(value: 'treatment', child: Text('Saldo Layanan (Treatment)')),
+            DropdownMenuItem(value: 'paket', child: Text('Saldo Paket')),
+          ],
+          onChanged: (String? newValue) {
+            if (newValue != null) {
+              setState(() {
+                _selectedJenisPayout = newValue;
+              });
+            }
+          },
+        ),
       ),
     );
   }
@@ -230,10 +374,10 @@ class _RequestPayoutScreenState extends State<RequestPayoutScreen> {
     required String label, 
     required String hint, 
     required TextEditingController controller,
-    Widget? prefixWidget, // Diubah menjadi Widget agar bisa menerima Text statis
+    Widget? prefixWidget, 
     int maxLines = 1,
     TextInputType keyboardType = TextInputType.text,
-    List<TextInputFormatter>? inputFormatters, // Tambahan parameter Formatter
+    List<TextInputFormatter>? inputFormatters, 
   }) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -250,11 +394,10 @@ class _RequestPayoutScreenState extends State<RequestPayoutScreen> {
             controller: controller,
             maxLines: maxLines,
             keyboardType: keyboardType,
-            inputFormatters: inputFormatters, // Menerapkan Formatter di sini
+            inputFormatters: inputFormatters,
             style: TextStyle(color: textDarkBrown, fontWeight: FontWeight.w600, fontSize: 15),
             decoration: InputDecoration(
-              prefixIcon: prefixWidget, // Menggunakan prefixIcon agar statis permanen
-              // prefixIconConstraints berfungsi agar kotak 'Rp' tidak memakan terlalu banyak ruang bawaan icon
+              prefixIcon: prefixWidget, 
               prefixIconConstraints: const BoxConstraints(minWidth: 0, minHeight: 0),
               hintText: hint,
               hintStyle: TextStyle(color: Colors.grey.shade400, fontWeight: FontWeight.normal),
@@ -353,7 +496,7 @@ class _RequestPayoutScreenState extends State<RequestPayoutScreen> {
           child: Padding(
             padding: const EdgeInsets.only(top: 2.0),
             child: Text(
-              'I confirm the payout data is correct.',
+              'Saya mengonfirmasi bahwa data penarikan ini sudah benar.',
               style: TextStyle(fontSize: 13, color: textDarkBrown, fontWeight: FontWeight.bold),
             ),
           ),
@@ -366,17 +509,24 @@ class _RequestPayoutScreenState extends State<RequestPayoutScreen> {
     return SizedBox(
       width: double.infinity,
       child: ElevatedButton(
-        onPressed: _submitPayout,
+        onPressed: _isSubmitting || _isLoadingBalance ? null : _submitPayout, 
         style: ElevatedButton.styleFrom(
           backgroundColor: const Color(0xFFC2185B),
+          disabledBackgroundColor: Colors.grey.shade400, 
           padding: const EdgeInsets.symmetric(vertical: 16),
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
           elevation: 0,
         ),
-        child: const Text(
-          ' Submit Payout Request ',
-          style: TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.bold),
-        ),
+        child: _isSubmitting
+            ? const SizedBox(
+                height: 20,
+                width: 20,
+                child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2),
+              )
+            : const Text(
+                ' Submit Payout Request ',
+                style: TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.bold),
+              ),
       ),
     );
   }
@@ -385,8 +535,6 @@ class _RequestPayoutScreenState extends State<RequestPayoutScreen> {
 // ============================================================================
 // LOGIKA ARSITEKTUR KUSTOM: FORMATTER MATA UANG RUPIAH
 // ============================================================================
-// Memformat teks secara instan saat pengguna mengetik agar titik ribuan 
-// diletakkan di tempat yang tepat tanpa merusak perilaku alami kursor.
 class CurrencyFormat extends TextInputFormatter {
   @override
   TextEditingValue formatEditUpdate(TextEditingValue oldValue, TextEditingValue newValue) {
@@ -394,11 +542,9 @@ class CurrencyFormat extends TextInputFormatter {
       return newValue.copyWith(text: '');
     }
 
-    // 1. Bersihkan semua input dan ambil hanya angkanya saja
     String numericOnly = newValue.text.replaceAll(RegExp(r'[^0-9]'), '');
     if (numericOnly.isEmpty) return newValue.copyWith(text: '');
 
-    // 2. Susun ulang angkanya dengan titik setiap 3 digit dari belakang
     String newText = '';
     int count = 0;
     for (int i = numericOnly.length - 1; i >= 0; i--) {
@@ -409,7 +555,6 @@ class CurrencyFormat extends TextInputFormatter {
       }
     }
 
-    // 3. Kembalikan nilai baru beserta posisi kursor yang dijaga di akhir tulisan
     return newValue.copyWith(
       text: newText,
       selection: TextSelection.collapsed(offset: newText.length),

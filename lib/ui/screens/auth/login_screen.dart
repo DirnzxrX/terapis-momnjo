@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart'; // <-- TAMBAHAN IMPORT INI
 import 'package:therapist_momnjo/data/api_service.dart';
 import 'package:therapist_momnjo/ui/widgets/hourglass_loading.dart';
 
@@ -51,7 +52,22 @@ class _LoginScreenState extends State<LoginScreen> {
     });
 
     if (response['success'] == true) {
-      final nama = response['data']['nama_lengkap'] ?? '';
+      // Ambil objek data dari response
+      final data = response['data'] ?? {}; 
+      final nama = data['nama_lengkap'] ?? '';
+
+      // --- TAMBAHAN: Simpan Rating & Review ke SharedPreferences ---
+      SharedPreferences prefs = await SharedPreferences.getInstance();
+      
+      // Ambil dari response API dan ubah ke String (berjaga-jaga jika backend mengirimkan int/double)
+      // PENTING: Pastikan 'rating' dan 'review_count' adalah key yang benar dari backend Anda
+      String rating = data['rating']?.toString() ?? '0.0';
+      String reviewCount = data['review_count']?.toString() ?? '0';
+
+      await prefs.setString('rating', rating);
+      await prefs.setString('review_count', reviewCount);
+      // -------------------------------------------------------------
+
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Selamat datang, $nama!')),
       );
@@ -187,7 +203,6 @@ class _LoginScreenState extends State<LoginScreen> {
                           const Text('Ingat saya', style: TextStyle(fontSize: 12)),
                         ],
                       ),
-
                     ],
                   ),
 

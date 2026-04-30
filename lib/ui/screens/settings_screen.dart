@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart'; // Tambahan Import
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({Key? key}) : super(key: key);
@@ -11,10 +12,40 @@ class _SettingsScreenState extends State<SettingsScreen> {
   final Color primaryPink = const Color(0xFFF48FB1); // Disamakan dengan home_screen.dart
   final Color textDark = Colors.black87;
 
-  // --- STATE DATA PENGATURAN DUMMY ---
-  String _userName = 'Rina Terapis';
-  String _userPhone = '+62 812 3456 7890';
-  bool _is2FAEnabled = false;
+  // --- STATE DATA DINAMIS ---
+  bool _isLoading = true;
+  String _userName = 'Memuat...';
+  String _userPhone = '-';
+  String _idTerapis = '-';
+  String _fotoProfil = 'https://i.pravatar.cc/150?img=5';
+
+  @override
+  void initState() {
+    super.initState();
+    _loadSettingsData();
+  }
+
+  // --- FUNGSI MENGAMBIL DATA DARI SHARED PREFERENCES ---
+  Future<void> _loadSettingsData() async {
+    try {
+      SharedPreferences prefs = await SharedPreferences.getInstance();
+      if (mounted) {
+        setState(() {
+          _userName = prefs.getString('fullname') ?? prefs.getString('nama_lengkap') ?? '-';
+          _userPhone = prefs.getString('no_telepon') ?? prefs.getString('phone') ?? '-';
+          _idTerapis = prefs.getString('username') ?? prefs.getString('id_terapis') ?? '-';
+          _fotoProfil = prefs.getString('foto_profil') ?? 'https://i.pravatar.cc/150?img=5';
+          _isLoading = false;
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+        });
+      }
+    }
+  }
 
   // --- HELPER UNTUK MENAMPILKAN PESAN (SNACKBAR) ---
   void _showInfoMessage(String message) {
@@ -67,12 +98,19 @@ class _SettingsScreenState extends State<SettingsScreen> {
               child: Text('Batal', style: TextStyle(color: Colors.grey.shade600, fontWeight: FontWeight.bold)),
             ),
             ElevatedButton(
-              onPressed: () {
+              onPressed: () async {
+                // Simpan ke SharedPreferences agar sinkron dengan DataDiriScreen & ProfileScreen
+                SharedPreferences prefs = await SharedPreferences.getInstance();
+                await prefs.setString('fullname', nameController.text);
+                await prefs.setString('no_telepon', phoneController.text);
+
+                // Update UI di halaman Settings ini
                 setState(() {
                   _userName = nameController.text;
                   _userPhone = phoneController.text;
                 });
-                Navigator.pop(context);
+
+                if (context.mounted) Navigator.pop(context);
                 _showInfoMessage('Profil berhasil diperbarui!');
               },
               style: ElevatedButton.styleFrom(
@@ -145,61 +183,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
     );
   }
 
-  // --- FITUR 3: VERIFIKASI DUA LANGKAH (2FA) ---
-  void _show2FADialog() {
-    showDialog(
-      context: context,
-      builder: (context) {
-        return StatefulBuilder(
-          builder: (context, setDialogState) {
-            return AlertDialog(
-              title: const Text('Verifikasi Dua Langkah', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-              content: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(
-                    'Tambahkan lapisan keamanan ekstra ke akun Anda. Jika diaktifkan, Anda akan memerlukan kode OTP khusus saat melakukan login.',
-                    style: TextStyle(fontSize: 13, color: Colors.grey.shade700, height: 1.4),
-                    textAlign: TextAlign.justify,
-                  ),
-                  const SizedBox(height: 16),
-                  Container(
-                    decoration: BoxDecoration(
-                      color: Colors.grey.shade50,
-                      borderRadius: BorderRadius.circular(12),
-                      border: Border.all(color: Colors.grey.shade200),
-                    ),
-                    child: SwitchListTile(
-                      title: const Text('Aktifkan 2FA', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
-                      value: _is2FAEnabled,
-                      activeColor: primaryPink,
-                      onChanged: (val) {
-                        setDialogState(() => _is2FAEnabled = val);
-                        setState(() => _is2FAEnabled = val); // Update ke UI Induk
-                        if (val) {
-                          _showInfoMessage('Verifikasi Dua Langkah diaktifkan');
-                        } else {
-                          _showInfoMessage('Verifikasi Dua Langkah dimatikan');
-                        }
-                      },
-                    ),
-                  ),
-                ],
-              ),
-              actions: [
-                TextButton(
-                  onPressed: () => Navigator.pop(context),
-                  child: Text('Tutup', style: TextStyle(color: textDark, fontWeight: FontWeight.bold)),
-                ),
-              ],
-            );
-          },
-        );
-      },
-    );
-  }
-
   @override
   Widget build(BuildContext context) {
     return Container(
@@ -232,39 +215,40 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ),
           centerTitle: true,
         ),
-        body: SafeArea(
-          child: SingleChildScrollView(
-            padding: const EdgeInsets.symmetric(horizontal: 20.0, vertical: 10.0),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                _buildProfileCard(),
-                const SizedBox(height: 20),
-                
-                _buildSectionCard(
-                  title: 'Akun & Keamanan',
-                  children: [
-                    _buildListTile(
-                      icon: Icons.person_outline, 
-                      title: 'Edit Profil', 
-                      subtitle: 'Ubah nama & nomor telepon',
-                      onTap: _showEditProfileDialog,
-                    ),
-                    _buildDivider(),
-                    _buildListTile(
-                      icon: Icons.lock_outline, 
-                      title: 'Email & Kata Sandi', 
-                      subtitle: 'Ubah kata sandi akun',
-                      onTap: _showChangePasswordDialog,
-                    ),
-                    
-                  ],
+        body: _isLoading 
+            ? const Center(child: CircularProgressIndicator()) 
+            : SafeArea(
+                child: SingleChildScrollView(
+                  padding: const EdgeInsets.symmetric(horizontal: 20.0, vertical: 10.0),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      _buildProfileCard(),
+                      const SizedBox(height: 20),
+                      
+                      _buildSectionCard(
+                        title: 'Akun & Keamanan',
+                        children: [
+                          _buildListTile(
+                            icon: Icons.person_outline, 
+                            title: 'Edit Profil', 
+                            subtitle: 'Ubah nama & nomor telepon',
+                            onTap: _showEditProfileDialog,
+                          ),
+                          _buildDivider(),
+                          _buildListTile(
+                            icon: Icons.lock_outline, 
+                            title: 'Email & Kata Sandi', 
+                            subtitle: 'Ubah kata sandi akun',
+                            onTap: _showChangePasswordDialog,
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 40),
+                    ],
+                  ),
                 ),
-                const SizedBox(height: 40),
-              ],
-            ),
-          ),
-        ),
+              ),
       ),
     );
   }
@@ -293,9 +277,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
               shape: BoxShape.circle,
               color: primaryPink.withOpacity(0.15), // Efek transparan dari primaryPink
             ),
-            child: const CircleAvatar(
+            child: CircleAvatar(
               radius: 30,
-              backgroundImage: NetworkImage('https://i.pravatar.cc/150?img=5'), 
+              backgroundImage: NetworkImage(_fotoProfil), 
             ),
           ),
           const SizedBox(width: 16),
@@ -310,10 +294,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     fontWeight: FontWeight.bold,
                     color: textDark,
                   ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
                 ),
                 const SizedBox(height: 4),
                 Text(
-                  '$_userPhone • TRP00128', // Menggunakan variabel dinamis
+                  '$_userPhone • $_idTerapis', // Menggunakan variabel dinamis
                   style: TextStyle(
                     fontSize: 12,
                     color: Colors.grey[600],

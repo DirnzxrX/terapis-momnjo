@@ -1,14 +1,68 @@
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
-class DataDiriScreen extends StatelessWidget {
+class DataDiriScreen extends StatefulWidget {
   const DataDiriScreen({Key? key}) : super(key: key);
 
+  @override
+  State<DataDiriScreen> createState() => _DataDiriScreenState();
+}
+
+class _DataDiriScreenState extends State<DataDiriScreen> {
   final Color textDarkBrown = const Color(0xFF4A332B);
   final Color primaryPeach = const Color(0xFFECA898);
 
+  // --- STATE VARIABEL UNTUK DATA DINAMIS ---
+  bool _isLoading = true;
+  String _namaLengkap = "-";
+  String _noTelepon = "-";
+  String _email = "-";
+  String _tanggalLahir = "-";
+  String _jenisKelamin = "-";
+  String _alamat = "-";
+  String _noPegawai = "-";
+  String _gerai = "-";
+  String _fotoProfil = "https://i.pravatar.cc/150?img=5"; // Gambar fallback jika API belum ada foto
+
+  @override
+  void initState() {
+    super.initState();
+    _loadDataDiri();
+  }
+
+  // --- FUNGSI MENGAMBIL DATA DARI SHARED PREFERENCES ---
+  Future<void> _loadDataDiri() async {
+    try {
+      SharedPreferences prefs = await SharedPreferences.getInstance();
+
+      // Mengambil data, pastikan KEY yang digunakan ('nama_lengkap', 'no_telepon', dll) 
+      // sama dengan KEY yang Anda simpan saat login.
+      if (mounted) {
+        setState(() {
+          _namaLengkap = prefs.getString('fullname') ?? prefs.getString('nama_lengkap') ?? "-";
+          _noTelepon = prefs.getString('no_telepon') ?? prefs.getString('phone') ?? "-";
+          _email = prefs.getString('email') ?? "-";
+          _tanggalLahir = prefs.getString('tanggal_lahir') ?? "-";
+          _jenisKelamin = prefs.getString('jenis_kelamin') ?? "-";
+          _alamat = prefs.getString('alamat') ?? "-";
+          _noPegawai = prefs.getString('username') ?? prefs.getString('id_terapis') ?? "-";
+          _gerai = prefs.getString('gerai') ?? prefs.getString('branch') ?? "-";
+          _fotoProfil = prefs.getString('foto_profil') ?? "https://i.pravatar.cc/150?img=5";
+          
+          _isLoading = false;
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+        });
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
-    // Membungkus Scaffold dengan Container untuk Background Image
     return Container(
       decoration: const BoxDecoration(
         image: DecorationImage(
@@ -35,41 +89,41 @@ class DataDiriScreen extends StatelessWidget {
           ),
           centerTitle: true,
         ),
-        body: SingleChildScrollView(
-          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
-          child: Column(
-            children: [
-              _buildProfilePicture(),
-              const SizedBox(height: 24),
-              
-              // Kartu Informasi Pribadi
-              _buildInfoSection(
-                title: 'Informasi Pribadi',
-                items: [
-                  _buildInfoItem(Icons.person_outline, 'Nama Lengkap', 'Andiro'),
-                  _buildInfoItem(Icons.phone_outlined, 'Nomor Telepon', '+62 812 3456 7890'),
-                  _buildInfoItem(Icons.email_outlined, 'Email', 'rina.terapis@momnjo.com'),
-                  _buildInfoItem(Icons.calendar_today_outlined, 'Tanggal Lahir', '12 Agustus 1995'),
-                  _buildInfoItem(Icons.female_outlined, 'Jenis Kelamin', 'Laki - Laki'),
-                  _buildInfoItem(Icons.location_on_outlined, 'Alamat', 'Jl. Melati No. 10, Bandung'),
-                ],
+        body: _isLoading
+            ? const Center(child: CircularProgressIndicator()) // Menampilkan loading saat memuat data
+            : SingleChildScrollView(
+                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+                child: Column(
+                  children: [
+                    _buildProfilePicture(),
+                    const SizedBox(height: 24),
+                    
+                    // Kartu Informasi Pribadi (Data Dinamis)
+                    _buildInfoSection(
+                      title: 'Informasi Pribadi',
+                      items: [
+                        _buildInfoItem(Icons.person_outline, 'Nama Lengkap', _namaLengkap),
+                        _buildInfoItem(Icons.phone_outlined, 'Nomor Telepon', _noTelepon),
+                        _buildInfoItem(Icons.email_outlined, 'Email', _email),
+                        _buildInfoItem(Icons.calendar_today_outlined, 'Tanggal Lahir', _tanggalLahir),
+                        _buildInfoItem(Icons.female_outlined, 'Jenis Kelamin', _jenisKelamin),
+                        _buildInfoItem(Icons.location_on_outlined, 'Alamat', _alamat),
+                      ],
+                    ),
+                    const SizedBox(height: 16),
+                    
+                    // Kartu Informasi Pekerjaan (Data Dinamis)
+                    _buildInfoSection(
+                      title: 'Informasi Pekerjaan',
+                      items: [
+                        _buildInfoItem(Icons.badge_outlined, 'No.Pegawai', _noPegawai),
+                        _buildInfoItem(Icons.map_outlined, 'Gerai / Area', _gerai),
+                      ],
+                    ),
+                    const SizedBox(height: 40),
+                  ],
+                ),
               ),
-              const SizedBox(height: 16),
-              
-              // Kartu Informasi Pekerjaan
-              _buildInfoSection(
-                title: 'Informasi Pekerjaan',
-                items: [
-                  _buildInfoItem(Icons.badge_outlined, 'No.Pegawai', 'TRP00128'),
-                  _buildInfoItem(Icons.map_outlined, 'Gerai', 'Bandung & Cimahi'),
-                  // _buildInfoItem(Icons.work_outline, 'Pengalaman', '3 Tahun'),
-                  // _buildInfoItem(Icons.spa_outlined, 'Spesialisasi', 'Mother Care, Baby Spa'),
-                ],
-              ),
-              const SizedBox(height: 40),
-            ],
-          ),
-        ),
       ),
     );
   }
@@ -92,9 +146,9 @@ class DataDiriScreen extends StatelessWidget {
                 ),
               ],
             ),
-            child: const CircleAvatar(
+            child: CircleAvatar(
               radius: 50,
-              backgroundImage: NetworkImage('https://i.pravatar.cc/150?img=5'),
+              backgroundImage: NetworkImage(_fotoProfil), // Foto Dinamis
             ),
           ),
           Positioned(

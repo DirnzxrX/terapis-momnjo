@@ -31,6 +31,9 @@ class _EarningsScreenState extends State<EarningsScreen> {
   double _komisiPaket = 0;
   List<dynamic> _rincianPaket = [];
 
+  // Payout History Data
+  List<dynamic> _payoutHistory = [];
+
   // Periode Data
   String _startDate = '';
   String _endDate = '';
@@ -38,17 +41,33 @@ class _EarningsScreenState extends State<EarningsScreen> {
   // State tambahan untuk nyimpen pilihan tanggal dari kalender
   DateTimeRange? _selectedDateRange;
 
-  // --- DATA DUMMY: Riwayat Penarikan Dana (Payout) ---
-  final List<Map<String, dynamic>> _payoutHistory = [
-    {'date': '18 Apr 2026', 'id': 'PO240418001', 'amount': 'Rp 1.500.000', 'status': 'Pending', 'est': 'Est. transfer: 20 Apr 2026'},
-    {'date': '10 Apr 2026', 'id': 'PO240410002', 'amount': 'Rp 800.000', 'status': 'Paid', 'est': null},
-    {'date': '18 Mar 2026', 'id': 'PO240318005', 'amount': 'Rp 2.100.000', 'status': 'Paid', 'est': null},
-  ];
-
   @override
   void initState() {
     super.initState();
-    _fetchEarningsData();
+    
+    // 🔥 SET DEFAULT PERIODE: Bulan Berjalan
+    final now = DateTime.now();
+    _selectedDateRange = DateTimeRange(
+      start: DateTime(now.year, now.month, 1),
+      end: DateTime(now.year, now.month + 1, 0), // Hari terakhir bulan ini
+    );
+
+    // Ambil data pertama kali berdasarkan range default
+    _fetchDataForSelectedRange();
+  }
+
+  // 🔥 FUNGSI PEMBANTU UNTUK MEMANGGIL API BERDASARKAN FILTER
+  void _fetchDataForSelectedRange() {
+    if (_selectedDateRange != null) {
+      String start = DateFormat('yyyy-MM-dd').format(_selectedDateRange!.start);
+      String end = DateFormat('yyyy-MM-dd').format(_selectedDateRange!.end);
+      _fetchEarningsData(start: start, end: end);
+    } else {
+      _fetchEarningsData();
+    }
+    
+    // Panggil juga API Riwayat Payout
+    _fetchPayoutHistory();
   }
 
   // 🔥 HELPER AMAN UNTUK PARSING ANGKA DARI JSON PHP
@@ -97,10 +116,8 @@ class _EarningsScreenState extends State<EarningsScreen> {
         _selectedDateRange = picked;
       });
       
-      String start = DateFormat('yyyy-MM-dd').format(picked.start);
-      String end = DateFormat('yyyy-MM-dd').format(picked.end);
-      
-      _fetchEarningsData(start: start, end: end);
+      // Panggil data dengan tanggal yang baru dipilih
+      _fetchDataForSelectedRange();
     }
   }
 
@@ -109,25 +126,27 @@ class _EarningsScreenState extends State<EarningsScreen> {
     setState(() => _isLoading = true);
     
     try {
-      final response = await ApiService().getEarningsData(startDate: start, endDate: end);
+      final response = await ApiService().getBalance(startDate: start, endDate: end);
 
       if (response['status'] == 'success' || response['success'] == true) {
-        final data = response['data'];
+        final data = response['data'] ?? {};
 
         setState(() {
-          // 🔥 UPDATE: Menggunakan struktur flat terbaru untuk mendapatkan komisi terpisah & Paket
-          _totalKomisi = _parseDouble(data['total_komisi']);
+          _totalKomisi = _parseDouble(data['total_balance_keseluruhan']);
           
-          // Treatment
-          _pendapatanKotorTreatment = _parseDouble(data['pendapatan_sebelum_diskon']);
-          _pendapatanBersihTreatment = _parseDouble(data['pendapatan_setelah_diskon']);
-          _komisiTreatment = _parseDouble(data['komisi_treatment']);
-          _rincianTreatment = data['rincian_treatment'] ?? [];
+          final Map<String, dynamic> treatmentData = data['treatment'] ?? {};
+          final Map<String, dynamic> paketData = data['paket'] ?? {};
+          
+          // Parsing Treatment
+          _pendapatanKotorTreatment = _parseDouble(treatmentData['pendapatan_sebelum_diskon']);
+          _pendapatanBersihTreatment = _parseDouble(treatmentData['pendapatan_setelah_diskon']);
+          _komisiTreatment = _parseDouble(treatmentData['komisi_treatment']);
+          _rincianTreatment = treatmentData['rincian_treatment'] ?? data['rincian_treatment'] ?? []; 
 
-          // Paket
-          _totalPenjualanPaket = _parseDouble(data['total_penjualan_paket']);
-          _komisiPaket = _parseDouble(data['total_komisi_paket']);
-          _rincianPaket = data['rincian_paket'] ?? [];
+          // Parsing Paket
+          _totalPenjualanPaket = _parseDouble(paketData['harga_paket']);
+          _komisiPaket = _parseDouble(paketData['komisi_paket']);
+          _rincianPaket = paketData['rincian_paket'] ?? data['rincian_paket'] ?? [];
           
           _startDate = data['periode']?['start_date'] ?? '';
           _endDate = data['periode']?['end_date'] ?? '';
@@ -140,6 +159,22 @@ class _EarningsScreenState extends State<EarningsScreen> {
     } catch (e) {
       _showError('Terjadi kesalahan jaringan atau sistem.');
       debugPrint('Exception: $e');
+    }
+  }
+
+  // --- FUNGSI TARIK API RIWAYAT PENARIKAN (PAYOUT) ---
+  Future<void> _fetchPayoutHistory() async {
+    try {
+      final response = await ApiService().getPayoutHistory();
+      if (response['status'] == 'success' || response['success'] == true) {
+        if (mounted) {
+          setState(() {
+            _payoutHistory = response['data'] ?? [];
+          });
+        }
+      }
+    } catch (e) {
+      debugPrint('Exception fetching payout history: $e');
     }
   }
 
@@ -183,15 +218,7 @@ class _EarningsScreenState extends State<EarningsScreen> {
                   ),
                   IconButton(
                     icon: Icon(Icons.refresh, color: Colors.grey.shade700, size: 26),
-                    onPressed: () {
-                      if (_selectedDateRange != null) {
-                         String start = DateFormat('yyyy-MM-dd').format(_selectedDateRange!.start);
-                         String end = DateFormat('yyyy-MM-dd').format(_selectedDateRange!.end);
-                         _fetchEarningsData(start: start, end: end);
-                      } else {
-                         _fetchEarningsData();
-                      }
-                    }, 
+                    onPressed: _fetchDataForSelectedRange, 
                     padding: EdgeInsets.zero,
                     constraints: const BoxConstraints(),
                   ),
@@ -199,8 +226,8 @@ class _EarningsScreenState extends State<EarningsScreen> {
               ),
             ),
 
-            // 2. Row Periode
-            if (_selectedTab != 'Payout')
+            // 2. Row Periode (Disembunyikan jika di tab Riwayat Payout)
+            if (_selectedTab != 'Riwayat Payout')
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 20.0),
                 child: Row(
@@ -237,7 +264,7 @@ class _EarningsScreenState extends State<EarningsScreen> {
               transitionBuilder: (Widget child, Animation<double> animation) {
                 return FadeTransition(opacity: animation, child: child);
               },
-              child: _selectedTab == 'Payout' ? _buildPayoutCard() : _buildEarningsCard(),
+              child: _selectedTab == 'Riwayat Payout' ? _buildPayoutCard() : _buildEarningsCard(),
             ),
             
             const SizedBox(height: 24),
@@ -267,8 +294,7 @@ class _EarningsScreenState extends State<EarningsScreen> {
   }
 
   Widget _buildEarningsCard() {
-    String mainTitle = _selectedTab == 'Treatment' ? 'Komisi' : 'Komisi Paket';
-    // 🔥 Menggunakan komisi spesifik untuk tiap tab, bukan gabungannya, agar lebih jelas
+    String mainTitle = _selectedTab == 'Treatment' ? 'Komisi Treatment' : 'Komisi Paket';
     double mainAmount = _selectedTab == 'Treatment' ? _komisiTreatment : _komisiPaket;
 
     return Container(
@@ -284,12 +310,39 @@ class _EarningsScreenState extends State<EarningsScreen> {
       child: Column(
         children: [
           Padding(
-            padding: const EdgeInsets.symmetric(vertical: 24),
+            padding: const EdgeInsets.fromLTRB(20, 24, 20, 24),
             child: Column(
               children: [
                 Text(mainTitle, style: TextStyle(color: Colors.white.withOpacity(0.9), fontSize: 13, fontWeight: FontWeight.w500)),
                 const SizedBox(height: 8),
                 Text(formatRupiah(mainAmount), style: const TextStyle(color: Colors.white, fontSize: 32, fontWeight: FontWeight.bold)),
+                
+                // 🔥 TOMBOL REQUEST PAYOUT
+                const SizedBox(height: 16),
+                SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton(
+                    onPressed: () async {
+                      final result = await Navigator.pushNamed(context, '/request_payout');
+                      if (result == true) {
+                        setState(() => _selectedTab = 'Riwayat Payout');
+                        _fetchDataForSelectedRange(); // Ambil update terbaru (termasuk riwayat) setelah berhasil
+                        if (mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(content: Text('Riwayat Penarikan Dana sedang diperbarui...'), backgroundColor: Colors.green),
+                          );
+                        }
+                      }
+                    },
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFFC2185B), 
+                      elevation: 0,
+                      padding: const EdgeInsets.symmetric(vertical: 14),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                    ),
+                    child: const Text(' Request Payout ', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14)),
+                  ),
+                ),
               ],
             ),
           ),
@@ -301,7 +354,8 @@ class _EarningsScreenState extends State<EarningsScreen> {
               mainAxisAlignment: MainAxisAlignment.spaceEvenly,
               children: _selectedTab == 'Treatment' 
                 ? [
-                    _buildSubEarning('Total Omset', formatRupiah(_pendapatanBersihTreatment)),
+                    // Menggunakan pendapatan kotor
+                    _buildSubEarning('Total Omset', formatRupiah(_pendapatanKotorTreatment)),
                   ]
                 : [
                     _buildSubEarning('Total Penjualan Paket', formatRupiah(_totalPenjualanPaket)),
@@ -328,35 +382,11 @@ class _EarningsScreenState extends State<EarningsScreen> {
       ),
       child: Column(
         children: [
-          Text('Total Komisi Anda', style: TextStyle(color: Colors.white.withOpacity(0.9), fontSize: 13, fontWeight: FontWeight.w500)),
+          Text('Total Komisi Keseluruhan', style: TextStyle(color: Colors.white.withOpacity(0.9), fontSize: 13, fontWeight: FontWeight.w500)),
           const SizedBox(height: 8),
           Text(formatRupiah(_totalKomisi), style: const TextStyle(color: Colors.white, fontSize: 32, fontWeight: FontWeight.bold)),
           const SizedBox(height: 4),
-          Text('Ready to withdraw', style: TextStyle(color: Colors.white.withOpacity(0.8), fontSize: 12, fontWeight: FontWeight.w500)),
-          const SizedBox(height: 24),
-          SizedBox(
-            width: double.infinity,
-            child: ElevatedButton(
-              onPressed: () async {
-                final result = await Navigator.pushNamed(context, '/request_payout');
-                if (result == true) {
-                  setState(() => _selectedTab = 'Payout');
-                  if (mounted) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(content: Text('Riwayat Penarikan Dana sedang diperbarui...'), backgroundColor: Colors.green),
-                    );
-                  }
-                }
-              },
-              style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFFC2185B), 
-                elevation: 0,
-                padding: const EdgeInsets.symmetric(vertical: 14),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-              ),
-              child: const Text(' Request Payout ', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14)),
-            ),
-          ),
+          Text('Keseluruhan komisi yang Anda dapatkan', style: TextStyle(color: Colors.white.withOpacity(0.8), fontSize: 12, fontWeight: FontWeight.w500)),
         ],
       ),
     );
@@ -373,7 +403,8 @@ class _EarningsScreenState extends State<EarningsScreen> {
   }
 
   Widget _buildTabs() {
-    final tabs = ['Treatment', 'Paket'];
+    final tabs = ['Treatment', 'Paket', 'Riwayat Payout'];
+    
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 20),
       child: Row(
@@ -393,10 +424,13 @@ class _EarningsScreenState extends State<EarningsScreen> {
                 alignment: Alignment.center,
                 child: Text(
                   tab,
+                  textAlign: TextAlign.center,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
                   style: TextStyle(
                     color: isSelected ? Colors.white : Colors.grey.shade700,
                     fontWeight: isSelected ? FontWeight.bold : FontWeight.w600,
-                    fontSize: 13,
+                    fontSize: 12, 
                   ),
                 ),
               ),
@@ -444,7 +478,7 @@ class _EarningsScreenState extends State<EarningsScreen> {
         final qty = item['quantity'] ?? 1;
         
         final komisiItem = _parseDouble(item['komisi']);
-        final pendapatanBersihItem = _parseDouble(item['pendapatan_setelah_diskon']);
+        final pendapatanKotorItem = _parseDouble(item['pendapatan_sebelum_diskon']);
         
         String tglDokumen = item['tgl_dokumen'] ?? '';
         String jam = item['jam'] ?? '';
@@ -492,7 +526,7 @@ class _EarningsScreenState extends State<EarningsScreen> {
                     children: [
                       Text(namaTreatment, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: Colors.black87)),
                       const SizedBox(height: 4),
-                      Text('Harga: ${formatRupiah(pendapatanBersihItem)}  •  Qty: $qty', style: TextStyle(fontSize: 11, color: Colors.grey.shade600)),
+                      Text('Harga: ${formatRupiah(pendapatanKotorItem)}  •  Qty: $qty', style: TextStyle(fontSize: 11, color: Colors.grey.shade600)),
                     ],
                   ),
                 ),
@@ -533,7 +567,6 @@ class _EarningsScreenState extends State<EarningsScreen> {
       itemBuilder: (context, index) {
         final item = _rincianPaket[index];
         final namaPaket = item['package_custom_name'] ?? 'Paket Tidak Diketahui';
-        // 🔥 UPDATE: Menggunakan key 'harga_paket' sesuai dari query PHP yang terbaru
         final hargaPaket = _parseDouble(item['harga_paket']);
         final komisiItem = _parseDouble(item['komisi']);
         
@@ -602,7 +635,21 @@ class _EarningsScreenState extends State<EarningsScreen> {
     );
   }
 
+  // 🔥 FUNGSI BARU UNTUK RENDER LIST RIWAYAT ASLI DARI API
   Widget _buildPayoutListView() {
+    if (_payoutHistory.isEmpty) {
+      return Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(Icons.history_toggle_off, size: 48, color: Colors.grey.shade300),
+            const SizedBox(height: 16),
+            Text('Belum ada riwayat penarikan dana.', style: TextStyle(color: Colors.grey.shade500)),
+          ],
+        ),
+      );
+    }
+
     return ListView.separated(
       padding: const EdgeInsets.only(top: 10, bottom: 20),
       itemCount: _payoutHistory.length,
@@ -612,51 +659,94 @@ class _EarningsScreenState extends State<EarningsScreen> {
       ),
       itemBuilder: (context, index) {
         final item = _payoutHistory[index];
-        bool isPending = item['status'] == 'Pending';
+        
+        // Menerapkan UI / UX berdasarkan dokumentasi API Payout History
+        final String status = (item['status'] ?? 'pending').toString().toLowerCase();
+        final String idPayout = item['id_payout']?.toString() ?? '-';
+        final double amount = _parseDouble(item['requested_amount']);
+        final String note = item['note']?.toString() ?? '';
+        
+        String displayDate = item['created_at'] ?? '';
+        try {
+          if (displayDate.isNotEmpty) {
+            DateTime dt = DateTime.parse(displayDate);
+            displayDate = DateFormat('dd MMM yyyy, HH:mm').format(dt);
+          }
+        } catch (_) {}
 
-        return Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          crossAxisAlignment: CrossAxisAlignment.center,
-          children: [
-            Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+        Color statusColor = Colors.amber.shade700;
+        Color statusBgColor = Colors.amber.shade100;
+        String statusText = 'Pending';
+
+        if (status == 'pending' || status == 'on_process') {
+          statusColor = Colors.amber.shade700;
+          statusBgColor = Colors.amber.shade100;
+          statusText = status == 'on_process' ? 'Diproses' : 'Pending';
+        } else if (status == 'approved' || status == 'completed') {
+          statusColor = Colors.green.shade700;
+          statusBgColor = Colors.green.shade100;
+          statusText = status == 'completed' ? 'Selesai' : 'Disetujui';
+        } else if (status == 'rejected') {
+          statusColor = Colors.red.shade700;
+          statusBgColor = Colors.red.shade100;
+          statusText = 'Ditolak';
+        }
+
+        return InkWell(
+          onTap: () {
+            // Membuka detail menggunakan item
+            Navigator.pushNamed(context, '/history_detail_payout', arguments: item);
+          },
+          borderRadius: BorderRadius.circular(8), 
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: 4.0, horizontal: 4.0), 
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              crossAxisAlignment: CrossAxisAlignment.center,
               children: [
-                Text(item['date'], style: TextStyle(fontSize: 13, color: Colors.grey.shade700, fontWeight: FontWeight.w600)),
-                const SizedBox(height: 4),
-                Text('ID: ${item['id']}', style: TextStyle(fontSize: 12, color: Colors.grey.shade500)),
-                const SizedBox(height: 12),
-                Text(item['amount'], style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w900, color: Colors.black87)),
-                if (item['est'] != null) ...[
-                  const SizedBox(height: 4),
-                  Text(item['est'], style: TextStyle(fontSize: 11, color: Colors.grey.shade600)),
-                ]
-              ],
-            ),
-            Column(
-              crossAxisAlignment: CrossAxisAlignment.end,
-              children: [
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                  decoration: BoxDecoration(
-                    color: isPending ? Colors.amber.shade100 : Colors.green.shade100, 
-                    borderRadius: BorderRadius.circular(12)
-                  ),
-                  child: Row(
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Container(
-                        width: 6, height: 6, 
-                        decoration: BoxDecoration(shape: BoxShape.circle, color: isPending ? Colors.amber.shade700 : Colors.green.shade700),
-                      ),
-                      const SizedBox(width: 6),
-                      Text(item['status'], style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: isPending ? Colors.amber.shade800 : Colors.green.shade800)),
+                      Text(displayDate, style: TextStyle(fontSize: 13, color: Colors.grey.shade700, fontWeight: FontWeight.w600)),
+                      const SizedBox(height: 4),
+                      Text('ID: PY-$idPayout', style: TextStyle(fontSize: 12, color: Colors.grey.shade500)),
+                      const SizedBox(height: 12),
+                      Text(formatRupiah(amount), style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w900, color: Colors.black87)),
+                      if (note.isNotEmpty) ...[
+                        const SizedBox(height: 4),
+                        Text(note, style: TextStyle(fontSize: 11, color: Colors.grey.shade600), maxLines: 2, overflow: TextOverflow.ellipsis),
+                      ]
                     ],
                   ),
                 ),
-                const SizedBox(height: 16),
-                Icon(Icons.chevron_right, color: Colors.grey.shade400),
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                      decoration: BoxDecoration(
+                        color: statusBgColor, 
+                        borderRadius: BorderRadius.circular(12)
+                      ),
+                      child: Row(
+                        children: [
+                          Container(
+                            width: 6, height: 6, 
+                            decoration: BoxDecoration(shape: BoxShape.circle, color: statusColor),
+                          ),
+                          const SizedBox(width: 6),
+                          Text(statusText, style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: statusColor)),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                    Icon(Icons.chevron_right, color: Colors.grey.shade400),
+                  ],
+                ),
               ],
             ),
-          ],
+          ),
         );
       },
     );

@@ -1,10 +1,10 @@
-import 'dart:io'; // Untuk membaca File gambar
+import 'dart:io'; 
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart'; 
 import 'package:therapist_momnjo/data/api_service.dart';
 import 'package:intl/intl.dart';
-import 'package:image_picker/image_picker.dart'; // Tambahkan package ini
-import 'package:geolocator/geolocator.dart'; // Tambahkan package ini
+import 'package:image_picker/image_picker.dart'; 
+import 'package:geolocator/geolocator.dart'; 
 import 'pemeriksaan_screen.dart'; 
 
 class BookingDetailScreen extends StatefulWidget {
@@ -26,6 +26,9 @@ class _BookingDetailScreenState extends State<BookingDetailScreen> {
   String? _arrivalPhotoPath; 
   Position? _currentPosition;
   String _photoTimestamp = '';
+
+  // --- STATE BARU: Melacak apakah pemeriksaan di-skip ---
+  bool _isPemeriksaanSkipped = false;
 
   @override
   void didChangeDependencies() {
@@ -58,6 +61,19 @@ class _BookingDetailScreenState extends State<BookingDetailScreen> {
     }
   }
 
+  // Helper untuk mengubah key status API menjadi teks tampilan bahasa Indonesia
+  String _getStatusLabel(String status) {
+    switch (status.toLowerCase()) {
+      case 'accepted': return 'Pekerjaan di terima';
+      case 'arrived': return 'Sudah tiba';
+      case 'pemeriksaan': return 'Cek Kesehatan';
+      case 'started': return 'Mulai';
+      case 'completed': 
+      case 'closed': return 'Selesai';
+      default: return status.toUpperCase();
+    }
+  }
+
   // --- FUNGSI UPDATE STATUS KE BACKEND ---
   Future<void> _updateStatusAPI(String newStatus) async {
     final String bookingId = _data?['id_booking']?.toString() ?? '';
@@ -76,7 +92,6 @@ class _BookingDetailScreenState extends State<BookingDetailScreen> {
       idBooking: bookingId, 
       newStatus: newStatus,
       imagePath: _arrivalPhotoPath, 
-      // Catatan: Jika backend Anda mendukung, Anda juga bisa mengirim _currentPosition?.latitude dll ke API di sini
     );
 
     if (mounted) {
@@ -90,7 +105,6 @@ class _BookingDetailScreenState extends State<BookingDetailScreen> {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text(response['message'] ?? 'Gagal update status server')),
         );
-        // Tetap paksa update lokal buat testing (Hapus saat ke Production)
         setState(() {
           _currentStatus = newStatus;
           _data?['booking_status'] = newStatus; 
@@ -101,10 +115,9 @@ class _BookingDetailScreenState extends State<BookingDetailScreen> {
 
   // --- FUNGSI OTOMATIS AMBIL LOKASI DAN BUKA KAMERA ---
   Future<void> _captureSelfieAndLocation() async {
-    setState(() => _isUpdatingStatus = true); // Efek loading saat mencari GPS
+    setState(() => _isUpdatingStatus = true); 
 
     try {
-      // 1. Cek Layanan Lokasi dan Izin
       bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
       if (!serviceEnabled) {
         throw Exception('GPS tidak aktif. Mohon nyalakan lokasi Anda.');
@@ -121,20 +134,18 @@ class _BookingDetailScreenState extends State<BookingDetailScreen> {
         throw Exception('Izin lokasi ditolak secara permanen. Silakan atur di Setting HP.');
       }
 
-      // 2. Dapatkan Koordinat Saat Ini
       Position position = await Geolocator.getCurrentPosition(
         desiredAccuracy: LocationAccuracy.high,
       );
 
-      // 3. Buka Kamera Depan (Selfie)
       final ImagePicker picker = ImagePicker();
       final XFile? photo = await picker.pickImage(
         source: ImageSource.camera,
-        preferredCameraDevice: CameraDevice.front, // Memaksa kamera depan
+        preferredCameraDevice: CameraDevice.front, 
       );
 
       if (photo != null) {
-        if (!mounted) return; // Mencegah error context hilang saat kembali dari kamera
+        if (!mounted) return;
 
         setState(() {
           _arrivalPhotoPath = photo.path;
@@ -142,7 +153,6 @@ class _BookingDetailScreenState extends State<BookingDetailScreen> {
           _photoTimestamp = DateFormat('dd MMM yyyy, HH:mm:ss').format(DateTime.now());
         });
         
-        // 4. Jika berhasil, tampilkan Dialog Konfirmasi
         _showArrivalPhotoDialog();
       }
     } catch (e) {
@@ -157,7 +167,7 @@ class _BookingDetailScreenState extends State<BookingDetailScreen> {
     }
   }
 
-  // --- DIALOG UNTUK PREVIEW FOTO + WATERMARK (TIMESTAMP & GEOLOKASI) ---
+  // --- DIALOG UNTUK PREVIEW FOTO + WATERMARK ---
   void _showArrivalPhotoDialog() {
     showDialog(
       context: context,
@@ -173,26 +183,23 @@ class _BookingDetailScreenState extends State<BookingDetailScreen> {
               const Text('Pastikan wajah, lokasi, dan waktu sudah sesuai sebelum dikirim.', style: TextStyle(fontSize: 13, color: Colors.black54)),
               const SizedBox(height: 16),
               
-              // Frame Foto dengan Overlay Data
               if (_arrivalPhotoPath != null)
                 SizedBox(
-                  width: MediaQuery.of(context).size.width, // Memaksa batas layout agar render box memiliki ukuran pasti
+                  width: MediaQuery.of(context).size.width, 
                   child: ClipRRect(
                     borderRadius: BorderRadius.circular(16),
                     child: Stack(
                       alignment: Alignment.bottomLeft,
                       children: [
-                        // Preview Gambar
                         Image.file(
                           File(_arrivalPhotoPath!), 
                           height: 300, 
-                          width: double.maxFinite, // Menggunakan maxFinite sebagai ganti infinity
+                          width: double.maxFinite, 
                           fit: BoxFit.cover
                         ),
-                        // Overlay Timestamp & Geolokasi
                         Container(
-                          width: double.maxFinite, // Menggunakan maxFinite sebagai ganti infinity
-                          color: Colors.black.withOpacity(0.6), // Background transparan
+                          width: double.maxFinite, 
+                          color: Colors.black.withOpacity(0.6), 
                           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
@@ -341,7 +348,10 @@ class _BookingDetailScreenState extends State<BookingDetailScreen> {
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
             decoration: BoxDecoration(color: statusBg, borderRadius: BorderRadius.circular(20)),
-            child: Text(status.toUpperCase(), style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 11)),
+            child: Text(
+              _getStatusLabel(status).toUpperCase(), 
+              style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 11)
+            ),
           ),
           const SizedBox(height: 16),
           Row(
@@ -470,27 +480,50 @@ class _BookingDetailScreenState extends State<BookingDetailScreen> {
 
     return Column(
       children: [
-        _buildTimelineStep('Assigned', 'Terkonfirmasi', true, false),
-        _buildTimelineStep('Arrived', isArrived ? 'Sampai' : '-', isArrived, false),
-        _buildTimelineStep('Pemeriksaan', isPemeriksaan ? 'Selesai' : '-', isPemeriksaan, false), 
-        _buildTimelineStep('Started', isStarted ? 'Mulai' : '-', isStarted, false),
-        _buildTimelineStep('Completed', isCompleted ? 'Selesai' : '-', isCompleted, true),
+        _buildTimelineStep('Pekerjaan di terima', '', true, false),
+        _buildTimelineStep('Sudah tiba', '', isArrived, false),
+        // 🔴 Update: Kirim status isSkipped khusus untuk langkah pemeriksaan
+        _buildTimelineStep('Cek Kesehatan', '', isPemeriksaan, false, isSkipped: _isPemeriksaanSkipped), 
+        _buildTimelineStep('Mulai', '', isStarted, false),
+        _buildTimelineStep('Selesai', '', isCompleted, true),
       ],
     );
   }
 
-  Widget _buildTimelineStep(String label, String time, bool done, bool last) {
+  // 🔴 Update: Parameter baru isSkipped untuk menentukan ikon
+  Widget _buildTimelineStep(String label, String time, bool done, bool last, {bool isSkipped = false}) {
+    IconData icon = Icons.radio_button_unchecked;
+    Color color = Colors.grey;
+
+    if (done) {
+      if (isSkipped) {
+        icon = Icons.cancel; // Tanda Silang (X)
+        color = Colors.red;
+      } else {
+        icon = Icons.check_circle; // Tanda Ceklis
+        color = Colors.green;
+      }
+    }
+
     return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Column(
           children: [
-            Icon(done ? Icons.check_circle : Icons.radio_button_unchecked, color: done ? Colors.green : Colors.grey, size: 20), 
-            if (!last) Container(width: 2, height: 30, color: done ? Colors.green.withOpacity(0.5) : Colors.grey.shade300)
+            Icon(icon, color: color, size: 20), 
+            if (!last) Container(width: 2, height: 30, color: (done && !isSkipped) ? Colors.green.withOpacity(0.5) : (done && isSkipped) ? Colors.red.withOpacity(0.3) : Colors.grey.shade300)
           ]
         ),
         const SizedBox(width: 12),
-        Expanded(child: Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [Text(label, style: TextStyle(fontWeight: done ? FontWeight.bold : FontWeight.normal)), Text(time, style: const TextStyle(fontSize: 12))])),
+        Expanded(
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween, 
+            children: [
+              Text(label, style: TextStyle(fontWeight: done ? FontWeight.bold : FontWeight.normal, color: (done && isSkipped) ? Colors.red : Colors.black87)), 
+              if (time.isNotEmpty) Text(time, style: const TextStyle(fontSize: 12)),
+            ]
+          )
+        ),
       ],
     );
   }
@@ -515,9 +548,22 @@ class _BookingDetailScreenState extends State<BookingDetailScreen> {
     final s = _currentStatus.toLowerCase();
 
     if (s == 'arrived') {
-      return _buildSingleActionButton('PEMERIKSAAN KLIEN', () async {
-        await Navigator.push(context, MaterialPageRoute(builder: (context) => PemeriksaanScreen(bookingData: _data)));
-        await _updateStatusAPI('Pemeriksaan'); 
+      return _buildSingleActionButton('CEK KESEHATAN KLIEN', () async {
+        // 🔴 Tangkap hasil dari PemeriksaanScreen
+        final result = await Navigator.push(context, MaterialPageRoute(builder: (context) => PemeriksaanScreen(bookingData: _data)));
+        
+        // Cek apakah hasilnya adalah 'skipped' dari tombol Skip di screen pemeriksaan
+        if (result == 'skipped') {
+          setState(() {
+            _isPemeriksaanSkipped = true;
+          });
+        } else {
+          setState(() {
+            _isPemeriksaanSkipped = false;
+          });
+        }
+        
+        await _updateStatusAPI('Pemeriksaan');
       });
     }
 
@@ -549,27 +595,18 @@ class _BookingDetailScreenState extends State<BookingDetailScreen> {
         child: Row(
           children: [
             Expanded(
-              flex: 2,
               child: ElevatedButton.icon(
-                // Mengubah aksi tombol ARRIVED ke fungsi ambil selfie & GPS
                 onPressed: _isUpdatingStatus ? null : _captureSelfieAndLocation,
                 icon: _isUpdatingStatus 
                     ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white)) 
                     : const Icon(Icons.camera_alt, color: Colors.white, size: 20),
-                label: Text(_isUpdatingStatus ? 'MENUNGGU GPS...' : 'ARRIVED', style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.white)),
-                style: ElevatedButton.styleFrom(backgroundColor: Colors.green, padding: const EdgeInsets.symmetric(vertical: 16), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16))),
-              ),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              flex: 1,
-              child: OutlinedButton(
-                onPressed: () async {
-                  await Navigator.push(context, MaterialPageRoute(builder: (context) => PemeriksaanScreen(bookingData: _data)));
-                  await _updateStatusAPI('Pemeriksaan'); 
-                },
-                style: OutlinedButton.styleFrom(side: const BorderSide(color: Colors.grey), padding: const EdgeInsets.symmetric(vertical: 16), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16))),
-                child: const Text('SKIP', style: TextStyle(color: Colors.black54, fontWeight: FontWeight.bold)),
+                label: Text(_isUpdatingStatus ? 'MENUNGGU GPS...' : 'SUDAH TIBA', style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.white)),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.green, 
+                  padding: const EdgeInsets.symmetric(vertical: 16), 
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                  minimumSize: const Size(double.infinity, 54),
+                ),
               ),
             ),
           ],

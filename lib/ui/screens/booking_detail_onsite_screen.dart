@@ -22,6 +22,9 @@ class _DetailBookingOnsiteScreenState extends State<DetailBookingOnsiteScreen> {
   // STATE: Untuk menyimpan "titipan" data dari layar Active Job
   Map<String, dynamic>? _savedActiveJobState; 
 
+  // 🔴 STATE BARU: Untuk melacak apakah pemeriksaan di-skip
+  bool _isPemeriksaanSkipped = false;
+
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
@@ -32,13 +35,11 @@ class _DetailBookingOnsiteScreenState extends State<DetailBookingOnsiteScreen> {
         String passedStatus = args['booking_status'] ?? args['status'] ?? 'Accepted';
         passedStatus = passedStatus.trim(); 
         
-        // Jika dari API/sebelumnya statusnya 'new' atau 'open', otomatis anggap 'Accepted'
         if (['new', 'open', 'menunggu', 'pending'].contains(passedStatus.toLowerCase())) {
           passedStatus = 'Accepted';
         }
         _currentStatus = passedStatus;
       } else {
-        // Otomatis terkonfirmasi (Accepted) saat mendapat job baru
         _currentStatus = 'Accepted';
       }
       _isInitialized = true;
@@ -74,7 +75,6 @@ class _DetailBookingOnsiteScreenState extends State<DetailBookingOnsiteScreen> {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text(response['message'] ?? 'Gagal update status server')),
         );
-        // Fallback update lokal biar UI tetep jalan pas testing
         setState(() {
           _currentStatus = newStatus;
           _data?['booking_status'] = newStatus; 
@@ -83,7 +83,6 @@ class _DetailBookingOnsiteScreenState extends State<DetailBookingOnsiteScreen> {
     }
   }
 
-  // FUNGSI PUSAT: Membuka layar Job Aktif (ActiveJobScreen)
   Future<void> _openActiveJob() async {
     final result = await Navigator.pushNamed(
       context, 
@@ -98,9 +97,7 @@ class _DetailBookingOnsiteScreenState extends State<DetailBookingOnsiteScreen> {
       final Map<String, dynamic> resultMap = Map<String, dynamic>.from(result);
 
       if (resultMap['action'] == 'finish_treatment') {
-        // 1. Panggil API update status ke Closed
         await _updateStatusAPI('Closed');
-        
         setState(() {
           _currentStatus = 'Completed'; 
           _data?['durasi_aktual'] = resultMap['durasi_aktual'];
@@ -111,11 +108,6 @@ class _DetailBookingOnsiteScreenState extends State<DetailBookingOnsiteScreen> {
             'stepsDone': resultMap['stepsDone'] ?? [true, true, true, true, true],
           };
         });
-
-        // 🔥 PERBAIKAN: Di sini kemaren ada kode pushReplacementNamed ke /visit_report
-        // Udah gua hapus. Jadi dia bakal cuma update UI ke status 'Completed'
-        // dan tombol di bawah bakal otomatis berubah jadi "BUAT LAPORAN KUNJUNGAN".
-
       } else if (resultMap['action'] == 'save_state') {
         setState(() {
           _currentStatus = 'Started';
@@ -127,33 +119,17 @@ class _DetailBookingOnsiteScreenState extends State<DetailBookingOnsiteScreen> {
 
   @override
   Widget build(BuildContext context) {
-    // --- MENGAMBIL DATA DARI STRUKTUR API TERBARU ---
     final String nama = _data?['customer_name'] ?? _data?['customer_fullname'] ?? 'Klien';
     final String telepon = _data?['customer_phone'] ?? _data?['phone'] ?? '0812 456 7890';
-    
-    // Lokasi dari API
     final String gerai = _data?['gerai'] ?? 'Klinik Mom n Jo';
     final String roomType = _data?['room_type'] ?? 'Onsite';
-    final String alamat = '$gerai (Ruang: $roomType)';
-    
     final String startTime = _data?['start_time'] ?? '';
 
-    // MENGAMBIL LIST LAYANAN DINAMIS
     List<dynamic> layananList = [];
     if (_data != null && _data!['treatment_name'] != null) {
-      layananList = [
-        {
-          'name': _data!['treatment_name'],
-          'duration': 'Sesuai Layanan', 
-        }
-      ];
+      layananList = [{'name': _data!['treatment_name'], 'duration': 'Sesuai Layanan'}];
     } else {
-      layananList = _data?['treatments'] ?? _data?['services'] ?? [
-        {
-          'name': _data?['deskripsi'] ?? 'Mother Care Massage',
-          'duration': _data?['durasi'] ?? '90 menit',
-        }
-      ];
+      layananList = _data?['treatments'] ?? _data?['services'] ?? [];
     }
 
     return Scaffold(
@@ -165,7 +141,6 @@ class _DetailBookingOnsiteScreenState extends State<DetailBookingOnsiteScreen> {
         leading: IconButton(
           icon: const Icon(Icons.arrow_back, color: Colors.black87),
           onPressed: () async {
-            // Kalau udah completed, biarin dia back biasa ke layar Schedule
             if (_currentStatus.toLowerCase() == 'started') {
               await _openActiveJob();
             } else {
@@ -173,10 +148,7 @@ class _DetailBookingOnsiteScreenState extends State<DetailBookingOnsiteScreen> {
             }
           },
         ),
-        title: const Text(
-          'Detail Booking (Onsite)', 
-          style: TextStyle(color: Colors.black87, fontSize: 18, fontWeight: FontWeight.bold)
-        ),
+        title: const Text('Detail Booking (Onsite)', style: TextStyle(color: Colors.black87, fontSize: 18, fontWeight: FontWeight.bold)),
         centerTitle: true,
       ),
       body: Column(
@@ -195,10 +167,7 @@ class _DetailBookingOnsiteScreenState extends State<DetailBookingOnsiteScreen> {
                   const SizedBox(height: 16),
                   _buildNotesCard(),
                   const SizedBox(height: 24),
-                  const Text(
-                    'Timeline Status',
-                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.black87),
-                  ),
+                  const Text('Timeline Status', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.black87)),
                   const SizedBox(height: 16),
                   _buildTimeline(_currentStatus),
                   const SizedBox(height: 40),
@@ -211,8 +180,6 @@ class _DetailBookingOnsiteScreenState extends State<DetailBookingOnsiteScreen> {
       ),
     );
   }
-
-  // --- WIDGET BUILDERS ---
 
   Widget _buildProfileCard(String nama, String telepon, String status) {
     Color statusBg;
@@ -248,10 +215,7 @@ class _DetailBookingOnsiteScreenState extends State<DetailBookingOnsiteScreen> {
                 ),
               ),
               if (_data?['id_booking'] != null)
-                Text(
-                  _data!['id_booking'],
-                  style: TextStyle(color: Colors.grey.shade500, fontSize: 12, fontWeight: FontWeight.bold),
-                ),
+                Text(_data!['id_booking'], style: TextStyle(color: Colors.grey.shade500, fontSize: 12, fontWeight: FontWeight.bold)),
             ],
           ),
           const SizedBox(height: 16),
@@ -269,25 +233,15 @@ class _DetailBookingOnsiteScreenState extends State<DetailBookingOnsiteScreen> {
                   ],
                 ),
               ),
-              // IKON TELEPON BIASA
               _buildSmallIconButton(Icons.phone_outlined, onTap: () async {
                 final Uri telUrl = Uri.parse('tel:$telepon');
-                if (await canLaunchUrl(telUrl)) {
-                  await launchUrl(telUrl);
-                } else {
-                  ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Tidak dapat membuka aplikasi Telepon')));
-                }
+                if (await canLaunchUrl(telUrl)) await launchUrl(telUrl);
               }),
               const SizedBox(width: 8),
-              // IKON CHAT WHATSAPP
               _buildSmallIconButton(Icons.chat_outlined, onTap: () async {
                 final String waNumber = telepon.replaceAll(RegExp(r'\D'), ''); 
                 final Uri waUrl = Uri.parse('https://wa.me/$waNumber');
-                if (await canLaunchUrl(waUrl)) {
-                  await launchUrl(waUrl, mode: LaunchMode.externalApplication);
-                } else {
-                  ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Tidak dapat membuka WhatsApp')));
-                }
+                if (await canLaunchUrl(waUrl)) await launchUrl(waUrl, mode: LaunchMode.externalApplication);
               }),
             ],
           ),
@@ -306,11 +260,7 @@ class _DetailBookingOnsiteScreenState extends State<DetailBookingOnsiteScreen> {
   Widget _buildLocationCard(String gerai, String roomType) {
     return Container(
       padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(16),
-        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.03), blurRadius: 8, offset: const Offset(0, 4))],
-      ),
+      decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(16), boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.03), blurRadius: 8)]),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -334,17 +284,12 @@ class _DetailBookingOnsiteScreenState extends State<DetailBookingOnsiteScreen> {
   Widget _buildServiceCard(List<dynamic> layananList, String startTime) {
     return Container(
       padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(16),
-        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.03), blurRadius: 8, offset: const Offset(0, 4))],
-      ),
+      decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(16), boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.03), blurRadius: 8)]),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           const Text('Layanan yang Dipilih', style: TextStyle(fontSize: 12, color: Colors.black54, fontWeight: FontWeight.bold)),
           const SizedBox(height: 12),
-          
           if (startTime.isNotEmpty) ...[
             Row(
               children: [
@@ -355,18 +300,9 @@ class _DetailBookingOnsiteScreenState extends State<DetailBookingOnsiteScreen> {
             ),
             const Divider(height: 24),
           ],
-
           ...layananList.map((item) {
-            String name = 'Layanan';
-            String duration = '90 menit';
-
-            if (item is Map) {
-              name = item['name'] ?? item['treatment_name'] ?? item['deskripsi'] ?? 'Layanan';
-              duration = item['duration']?.toString() ?? item['durasi']?.toString() ?? 'Sesuai Layanan';
-            } else {
-              name = item.toString();
-            }
-
+            String name = (item is Map) ? (item['name'] ?? item['treatment_name'] ?? item['deskripsi'] ?? 'Layanan') : item.toString();
+            String duration = (item is Map) ? (item['duration']?.toString() ?? item['durasi']?.toString() ?? 'Sesuai Layanan') : '90 menit';
             return Padding(
               padding: const EdgeInsets.only(bottom: 12.0),
               child: Row(
@@ -374,10 +310,7 @@ class _DetailBookingOnsiteScreenState extends State<DetailBookingOnsiteScreen> {
                 children: [
                   Container(
                     padding: const EdgeInsets.all(8),
-                    decoration: BoxDecoration(
-                      color: primaryPink.withOpacity(0.1),
-                      borderRadius: BorderRadius.circular(8),
-                    ),
+                    decoration: BoxDecoration(color: primaryPink.withOpacity(0.1), borderRadius: BorderRadius.circular(8)),
                     child: Icon(Icons.spa_outlined, color: primaryPink, size: 20),
                   ),
                   const SizedBox(width: 12),
@@ -403,11 +336,7 @@ class _DetailBookingOnsiteScreenState extends State<DetailBookingOnsiteScreen> {
   Widget _buildNotesCard() {
     return Container(
       padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(16),
-        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.03), blurRadius: 8, offset: const Offset(0, 4))],
-      ),
+      decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(16), boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.03), blurRadius: 8)]),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -421,8 +350,6 @@ class _DetailBookingOnsiteScreenState extends State<DetailBookingOnsiteScreen> {
 
   Widget _buildTimeline(String currentStatus) {
     final s = currentStatus.toLowerCase();
-    
-    // LOGIKA TIMELINE ONSITE: Tanpa OTW dan Arrived
     bool isAssigned = !['new', 'open'].contains(s);
     bool isPemeriksaan = ['pemeriksaan', 'started', 'completed', 'closed'].contains(s); 
     bool isStarted = ['started', 'completed', 'closed'].contains(s);
@@ -431,21 +358,36 @@ class _DetailBookingOnsiteScreenState extends State<DetailBookingOnsiteScreen> {
     return Column(
       children: [
         _buildTimelineStep('Pekerjaan di Terima', isAssigned ? '' : 'Menunggu', isAssigned, false),
-        _buildTimelineStep('Cek Kesehatan', isPemeriksaan ? '' : '-', isPemeriksaan, false), 
+        // 🔴 Update: Kirim status isSkipped ke step Pemeriksaan
+        _buildTimelineStep('Cek Kesehatan', isPemeriksaan ? (isPemeriksaan && _isPemeriksaanSkipped ? '' : 'Selesai') : '-', isPemeriksaan, false, isSkipped: _isPemeriksaanSkipped), 
         _buildTimelineStep('Mulai', isStarted ? '' : '-', isStarted, false),
         _buildTimelineStep('Selesai', isCompleted ? '' : '-', isCompleted, true),
       ],
     );
   }
 
-  Widget _buildTimelineStep(String label, String time, bool done, bool last) {
+  Widget _buildTimelineStep(String label, String time, bool done, bool last, {bool isSkipped = false}) {
+    // 🔴 Logika pemilihan ikon dan warna
+    IconData icon = Icons.radio_button_unchecked;
+    Color color = Colors.grey;
+
+    if (done) {
+      if (isSkipped) {
+        icon = Icons.cancel; // Tanda silang (X)
+        color = Colors.red;
+      } else {
+        icon = Icons.check_circle; // Tanda ceklis
+        color = Colors.green;
+      }
+    }
+
     return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Column(
           children: [
-            Icon(done ? Icons.check_circle : Icons.radio_button_unchecked, color: done ? Colors.green : Colors.grey, size: 20),
-            if (!last) Container(width: 2, height: 30, color: done ? Colors.green.withOpacity(0.5) : Colors.grey.shade300),
+            Icon(icon, color: color, size: 20),
+            if (!last) Container(width: 2, height: 30, color: done ? color.withOpacity(0.5) : Colors.grey.shade300),
           ],
         ),
         const SizedBox(width: 12),
@@ -454,7 +396,7 @@ class _DetailBookingOnsiteScreenState extends State<DetailBookingOnsiteScreen> {
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
               Text(label, style: TextStyle(fontWeight: done ? FontWeight.bold : FontWeight.normal, color: done ? Colors.black87 : Colors.grey)),
-              Text(time, style: const TextStyle(fontSize: 12, color: Colors.black54)),
+              Text(time, style: TextStyle(fontSize: 12, color: isSkipped ? Colors.red : Colors.black54)),
             ],
           ),
         ),
@@ -464,8 +406,6 @@ class _DetailBookingOnsiteScreenState extends State<DetailBookingOnsiteScreen> {
 
   Widget _buildBottomButton() {
     final s = _currentStatus.toLowerCase();
-
-    // TAMPILAN BUTTON SESUAI STATUS ONSITE
     String text = 'PANGGIL KLIEN (PEMERIKSAAN)';
     if (s == 'accepted' || s == 'new' || s == 'open') text = 'PANGGIL KLIEN (PEMERIKSAAN)'; 
     else if (s == 'pemeriksaan') text = 'MULAI SESI TREATMENT'; 
@@ -481,33 +421,27 @@ class _DetailBookingOnsiteScreenState extends State<DetailBookingOnsiteScreen> {
       child: SafeArea(
         child: ElevatedButton(
           onPressed: _isUpdatingStatus ? null : () async {
-            
-            // 1. STATUS AWAL -> Buka Pemeriksaan Klien
             if (s == 'accepted' || s == 'new' || s == 'open') {
-              await Navigator.push(context, MaterialPageRoute(builder: (context) => PemeriksaanScreen(bookingData: _data)));
+              // 🔴 Menangkap hasil dari PemeriksaanScreen
+              final result = await Navigator.push(context, MaterialPageRoute(builder: (context) => PemeriksaanScreen(bookingData: _data)));
+              
+              if (result == 'skipped') {
+                setState(() => _isPemeriksaanSkipped = true);
+              } else {
+                setState(() => _isPemeriksaanSkipped = false);
+              }
+              
               await _updateStatusAPI('Pemeriksaan'); 
             }
-            
-            // 2. PEMERIKSAAN -> Buka Timer Active Job
             else if (s == 'pemeriksaan') {
               await _updateStatusAPI('Started');
               await _openActiveJob();
             } 
-            
-            // 3. STARTED -> Lanjut Timer Active Job
             else if (s == 'started') {
               await _openActiveJob();
             } 
-            
-            // 4. COMPLETED/CLOSED -> Buka Form Laporan Visit
             else if (s == 'completed' || s == 'closed') {
-              // 🔥 INI DIA TUAN! 
-              // Pas tombol "Buat Laporan Kunjungan" dipencet, baru dia ngarah ke layar laporannya!
-              Navigator.pushReplacementNamed(
-                context, 
-                '/visit_report',
-                arguments: _data, 
-              );
+              Navigator.pushReplacementNamed(context, '/visit_report', arguments: _data);
             } 
           },
           style: ElevatedButton.styleFrom(

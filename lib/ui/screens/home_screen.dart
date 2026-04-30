@@ -39,7 +39,10 @@ class _HomeScreenState extends State<HomeScreen> {
 
     try {
       final prefs = await SharedPreferences.getInstance();
-      String? namaSimpanan = prefs.getString('nama_lengkap');
+      
+      // PERBAIKAN 1: Tambahkan fallback ke 'fullname' dan 'username' dari cache lokal
+      String? namaSimpanan = prefs.getString('nama_lengkap') ?? prefs.getString('fullname');
+      String? usernameSimpanan = prefs.getString('username');
       String? fotoSimpanan = prefs.getString('foto'); 
       String namaTampil = 'Terapis'; 
       
@@ -47,6 +50,8 @@ class _HomeScreenState extends State<HomeScreen> {
 
       if (namaSimpanan != null && namaSimpanan.trim().isNotEmpty) {
         namaTampil = namaSimpanan;
+      } else if (usernameSimpanan != null && usernameSimpanan.trim().isNotEmpty) {
+        namaTampil = usernameSimpanan; // Gunakan username jika nama_lengkap kosong
       }
       
       final api = ApiService();
@@ -116,6 +121,30 @@ class _HomeScreenState extends State<HomeScreen> {
                todayHistoryCount++;
             }
          }
+      }
+
+      // PERBAIKAN 2: FETCH PROFILE (Agar nama & foto di Home sinkron dengan Profile Screen)
+      try {
+        final profileResponse = await api.getProfile();
+        if (profileResponse['success'] == true || profileResponse['status'] == 'success') {
+          final data = profileResponse['data'];
+          
+          // Cek nama lengkap, jika kosong gunakan username
+          String fetchedName = data['nama_lengkap']?.toString() ?? '';
+          if (fetchedName.trim().isEmpty) {
+            fetchedName = data['username']?.toString() ?? namaTampil;
+          }
+          namaTampil = fetchedName;
+          
+          // Ambil URL Foto
+          if (data['avatar_url'] != null) {
+            fotoSimpanan = data['avatar_url'];
+          } else if (data['avatar'] != null && data['avatar'].toString().isNotEmpty) {
+            fotoSimpanan = "https://app.momnjo.com/assets/images/${data['avatar']}";
+          }
+        }
+      } catch (e) {
+        debugPrint("Gagal load profil di HomeScreen: $e");
       }
 
       if (mounted) {
@@ -379,9 +408,10 @@ class _HomeScreenState extends State<HomeScreen> {
         CircleAvatar(
           radius: 28,
           backgroundColor: Colors.grey.shade200,
+          // PERBAIKAN 3: Fallback gambar jika error 'default_profile.png'
           backgroundImage: _fotoProfile.isNotEmpty && _fotoProfile.startsWith('http')
               ? NetworkImage(_fotoProfile)
-              : const AssetImage('assets/default_profile.png') as ImageProvider, 
+              : const NetworkImage('https://ui-avatars.com/api/?name=Mom+N+Jo&background=ECA898&color=fff'), 
         ),
         const SizedBox(width: 12),
         Column(
@@ -423,7 +453,6 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  // 🔥 UPDATE: Tampilan Status Kerja Baru Sesuai Referensi Gambar (Tombol Kapsul & Jam Besar)
   Widget _buildStatusCard() {
     return Container(
       width: double.infinity,
@@ -620,7 +649,15 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
           ElevatedButton(
             onPressed: () {
-              Navigator.pushNamed(context, '/booking_detail', arguments: _nextBooking).then((_) {
+              // 🔴 LOGIKA PENGECEKAN BARU: Apakah ini Home Service atau Onsite?
+              String roomTypeStr = (_nextBooking?['room_type'] ?? _nextBooking?['type'] ?? _nextBooking?['kategori'] ?? '').toString().toLowerCase();
+              bool isHomeService = roomTypeStr.contains('home') || roomTypeStr.contains('kunjungan') || roomTypeStr.isEmpty;
+              
+              // Tentukan route-nya
+              String targetRoute = isHomeService ? '/booking_detail' : '/booking_detail_onsite';
+
+              // Buka halaman yang sesuai
+              Navigator.pushNamed(context, targetRoute, arguments: _nextBooking).then((_) {
                 _loadData();
               });
             },
