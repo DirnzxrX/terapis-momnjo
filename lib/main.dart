@@ -3,6 +3,7 @@ import 'package:therapist_momnjo/ui/screens/active_job_screen.dart';
 import 'package:therapist_momnjo/ui/screens/activity_detail_screen.dart';
 import 'package:therapist_momnjo/ui/screens/booking_detail_screen.dart';
 import 'package:therapist_momnjo/ui/screens/detail_laporan_screen.dart';
+import 'package:therapist_momnjo/ui/screens/history_detail_payout.dart';
 import 'package:therapist_momnjo/ui/screens/request_payout_screen.dart';
 
 // Import semua screen yang sudah dibuat
@@ -19,13 +20,14 @@ import 'package:therapist_momnjo/ui/screens/earnings_screen.dart';
 import 'package:therapist_momnjo/ui/screens/profile_screen.dart';
 import 'package:therapist_momnjo/ui/screens/leave_management_screen.dart'; // Tambahkan import LeaveManagementScreen
 import 'package:therapist_momnjo/ui/screens/active_job_screen.dart'; // Tambahkan import ActiveJobScreen
-import 'package:therapist_momnjo/ui/screens/activity_detail_screen.dart'; // Tambahkan import ActivityDetailScreen
-import 'package:therapist_momnjo/ui/screens/data_diri_screen.dart'; // Tambahkan import DataDiriScreen
-import 'package:therapist_momnjo/ui/screens/sop_panduan_screen.dart'; // Tambahkan import SOPPanduanScreen
-import 'package:therapist_momnjo/ui/screens/history_laporan_screen.dart'; // Tambahkan import SOPPanduanScreen
-import 'package:therapist_momnjo/ui/screens/bantuan_dukungan_screen.dart'; // Tambahkan import BantuanDukunganScreen
-import 'package:therapist_momnjo/ui/screens/detail_laporan_screen.dart'; // Tambahkan import DetailLaporanScreen
-import 'package:therapist_momnjo/ui/screens/booking_detail_onsite_screen.dart'; // Tambahkan import BookingDetailOnsiteScreen
+import 'package:therapist_momnjo/ui/screens/activity_detail_screen.dart'; 
+import 'package:therapist_momnjo/ui/screens/data_diri_screen.dart'; 
+import 'package:therapist_momnjo/ui/screens/sop_panduan_screen.dart'; 
+import 'package:therapist_momnjo/ui/screens/history_laporan_screen.dart'; 
+import 'package:therapist_momnjo/ui/screens/bantuan_dukungan_screen.dart'; 
+import 'package:therapist_momnjo/ui/screens/detail_laporan_screen.dart'; 
+import 'package:therapist_momnjo/ui/screens/booking_detail_onsite_screen.dart'; 
+import 'package:therapist_momnjo/ui/screens/history_detail_payout.dart'; 
 
 void main() {
   // Memastikan binding Flutter sudah terinisialisasi
@@ -115,6 +117,7 @@ class MomnjoTherapistApp extends StatelessWidget {
         '/bantuan_dukungan': (context) => const BantuanDukunganScreen(),
         '/detail_laporan': (context) => const DetailLaporanScreen(),
         '/booking_detail_onsite': (context) => const  DetailBookingOnsiteScreen(),
+        '/history_detail_payout' : (context) => const HistoryDetailPayoutScreen(),
       },
 
       // Fallback jika rute yang dituju tidak ditemukan

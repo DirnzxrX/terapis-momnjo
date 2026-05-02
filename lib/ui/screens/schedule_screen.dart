@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart'; // Tambahan untuk kDebugMode
 import 'package:therapist_momnjo/data/api_service.dart';
 import 'package:intl/intl.dart'; 
 
@@ -45,14 +46,24 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
     try {
       final api = ApiService();
       
-      // ✅ UPDATE: Sekarang langsung pakai getActiveJobs() dari ApiService yang baru
-      // Ini otomatis nembak ke get_all_jobs.php?status=open
+      // Memanggil API getActiveJobs()
       final response = await api.getActiveJobs(); 
 
       if (response['success'] == true) {
         if (mounted) {
           setState(() {
             _apiSchedules = response['data'] ?? [];
+            
+            // 🔴 DEBUGGING BANTUAN: Cetak isi data ke terminal agar Anda bisa lihat langsung!
+            if (kDebugMode) {
+              print("=== 🛠️ CEK DATA DARI BACKEND ===");
+              print("Jumlah Booking Masuk: ${_apiSchedules.length}");
+              if (_apiSchedules.isNotEmpty) {
+                print("Contoh Data 1: ${_apiSchedules.first}");
+              }
+              print("=================================");
+            }
+
             _applyFilters(); 
             _isLoading = false;
           });
@@ -75,39 +86,39 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
     }
   }
 
-  // --- FUNGSI FILTER LOKAL (Status, Kategori, Search & SORTING TERBARU) ---
+  // --- FUNGSI FILTER LOKAL (SUDAH DIPERLONGGAR) ---
   void _applyFilters() {
     setState(() {
       _filteredSchedules = _apiSchedules.where((schedule) {
         
-        // 1. FILTER STATUS UTAMA (Galakin Filternya)
+        // 1. FILTER STATUS (Diperlonggar, hanya membuang yang benar-benar selesai/batal)
         final String status = (schedule['status'] ?? schedule['booking_status'] ?? '').toString().toLowerCase().trim();
-        // Kalau statusnya emang udah ditandai selesai dari backend, buang dari list!
-        if (['close', 'closed', 'completed', 'selesai'].contains(status)) {
+        if (['close', 'closed', 'completed', 'selesai', 'cancel', 'batal', 'canceled'].contains(status)) {
           return false; 
         }
 
         // 1B. FILTER TAMBAHAN (Cek isi layanannya)
-        // Kalau status booking-nya masih "Open" TAPI ternyata semua layanannya udah is_done: true, buang juga!
         final List<dynamic> treatments = schedule['treatments'] ?? [];
         if (treatments.isNotEmpty) {
-          // Ngecek apakah SEMUA layanan di dalam array ini sudah is_done == true
           bool isAllTreatmentsDone = treatments.every((item) {
             return item is Map && item['is_done'] == true;
           });
           
           if (isAllTreatmentsDone) {
-            return false; // Jangan ditampilin kalau udah kelar semua layanannya
+            return false; // Sembunyikan kalau semua layanan sudah selesai
           }
         }
 
-        // 2. FILTER TIPE LAYANAN (Home Service vs Onsite)
-        bool isHome = schedule['room_type']?.toString().toLowerCase().contains('home') ?? false;
+        // 2. FILTER TIPE LAYANAN (Home Service vs Onsite) -> Menggunakan Multi-Key Checker
+        String roomTypeStr = (schedule['room_type'] ?? schedule['type'] ?? schedule['kategori'] ?? '').toString().toLowerCase();
+        
+        // Jika backend mengirim 'home', 'kunjungan', atau kosong, anggap Home Service.
+        bool isHome = roomTypeStr.contains('home') || roomTypeStr.contains('kunjungan') || roomTypeStr.isEmpty;
         bool matchesTab = _selectedTab == 'Home Service' ? isHome : !isHome;
 
         // 3. FILTER PENCARIAN (NAMA KLIEN / ID BOOKING)
         final query = _searchController.text.toLowerCase().trim();
-        final name = (schedule['customer_name'] ?? '').toString().toLowerCase();
+        final name = (schedule['customer_name'] ?? schedule['nama_customer'] ?? '').toString().toLowerCase();
         final idBook = (schedule['id_booking'] ?? '').toString().toLowerCase();
         bool matchesSearch = query.isEmpty || name.contains(query) || idBook.contains(query);
 
@@ -116,8 +127,8 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
 
       // 4. SORTING: URUTKAN BERDASARKAN WAKTU TERBARU DI ATAS
       _filteredSchedules.sort((a, b) {
-        DateTime timeA = DateTime.tryParse(a['start_time']?.toString() ?? '') ?? DateTime(2000);
-        DateTime timeB = DateTime.tryParse(b['start_time']?.toString() ?? '') ?? DateTime(2000);
+        DateTime timeA = DateTime.tryParse(a['start_time']?.toString() ?? a['jadwal']?.toString() ?? '') ?? DateTime(2000);
+        DateTime timeB = DateTime.tryParse(b['start_time']?.toString() ?? b['jadwal']?.toString() ?? '') ?? DateTime(2000);
         return timeB.compareTo(timeA); 
       });
     });
@@ -353,11 +364,13 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
   }
 
   Widget _buildScheduleCard(Map<dynamic, dynamic> schedule) {
-    bool isHomeService = schedule['room_type']?.toString().toLowerCase().contains('home') ?? false;
-    final String formattedTime = _formatTime(schedule['start_time']?.toString());
+    String roomTypeStr = (schedule['room_type'] ?? schedule['type'] ?? schedule['kategori'] ?? '').toString().toLowerCase();
+    bool isHomeService = roomTypeStr.contains('home') || roomTypeStr.contains('kunjungan') || roomTypeStr.isEmpty;
+    
+    final String formattedTime = _formatTime(schedule['start_time']?.toString() ?? schedule['jadwal']?.toString());
     
     final String idBooking = schedule['id_booking']?.toString() ?? '';
-    final String customerName = schedule['customer_name']?.toString() ?? 'Klien Tanpa Nama';
+    final String customerName = schedule['customer_name']?.toString() ?? schedule['nama_customer']?.toString() ?? 'Klien Tanpa Nama';
     
     final String displayTitle = (idBooking.isNotEmpty && idBooking != '-') ? idBooking : customerName;
     
@@ -373,9 +386,7 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
       onTap: () {
         final Map<String, dynamic> safeSchedule = Map<String, dynamic>.from(schedule);
         
-        bool isHomeService = schedule['room_type']?.toString().toLowerCase().contains('home') ?? false;
-
-        // ✅ Arahin sesuai Tab
+        // ✅ Arahin sesuai Tipe
         String targetRoute = isHomeService ? '/booking_detail' : '/booking_detail_onsite';
 
         Navigator.pushNamed(context, targetRoute, arguments: safeSchedule).then((_) {
@@ -430,7 +441,7 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
                   const SizedBox(height: 4),
                   
                   Text(
-                    schedule['treatment_summary']?.toString() ?? 'Detail treatment tidak tersedia',
+                    schedule['treatment_summary']?.toString() ?? schedule['layanan']?.toString() ?? 'Detail treatment tidak tersedia',
                     style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: primaryPink),
                     maxLines: 2,
                     overflow: TextOverflow.ellipsis,

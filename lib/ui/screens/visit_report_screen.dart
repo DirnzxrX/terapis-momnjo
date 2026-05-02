@@ -20,21 +20,11 @@ class _VisitReportScreenState extends State<VisitReportScreen> {
   final TextEditingController _notesController = TextEditingController();
   int _charCount = 0;
   final int _maxChar = 500;
-  
-  // Simulasi daftar foto
-  final List<String> _photos = []; 
 
-  // --- STATE UNTUK API & RATING ---
+  // --- STATE UNTUK API ---
   Map<String, dynamic>? _bookingData;
   bool _isDataLoaded = false;
   bool _isLoading = false;
-  
-  int _rating = 0; 
-  final List<String> _selectedTags = [];
-  final List<String> _availableTags = [
-    'Ramah', 'Tepat Waktu', 'Kooperatif', 
-    'Ruangan Bersih', 'Banyak Maunya', 'Sulit Dihubungi'
-  ];
 
   @override
   void didChangeDependencies() {
@@ -76,40 +66,20 @@ class _VisitReportScreenState extends State<VisitReportScreen> {
     );
   }
 
-  void _simulasikanTambahFoto() {
-    if (_photos.length >= 5) {
-      _showSnackbar('Maksimal 5 foto pendukung', isSuccess: false);
-      return;
-    }
-    setState(() {
-      _photos.add('https://picsum.photos/seed/${DateTime.now().millisecondsSinceEpoch}/150/150');
-    });
-  }
-
-  void _hapusFoto(int index) {
-    setState(() {
-      _photos.removeAt(index);
-    });
-  }
-
-  // 🔥 FUNGSI BARU: SKIP LAPORAN
+  // 🔥 FUNGSI SKIP LAPORAN
   void _skipReport() {
     _showSnackbar('Laporan dilewati. Bisa diisi nanti di menu Riwayat.');
     
     // Langsung banting ke layar Home tanpa submit ke API
     Future.delayed(const Duration(milliseconds: 800), () {
       if (mounted) {
-        Navigator.pushNamedAndRemoveUntil(context, '/home', (route) => false);
+        Navigator.pushNamedAndRemoveUntil(context, '/main', (route) => false);
       }
     });
   }
 
   // --- FUNGSI SUBMIT KE API BACKEND ---
   Future<void> _submitReport() async {
-    if (_rating == 0) {
-      _showSnackbar('Harap berikan rating bintang untuk klien!', isSuccess: false);
-      return;
-    }
     if (_notesController.text.trim().isEmpty) {
       _showSnackbar('Catatan Internal wajib diisi!', isSuccess: false);
       return;
@@ -127,8 +97,8 @@ class _VisitReportScreenState extends State<VisitReportScreen> {
       final api = ApiService();
       final result = await api.rateCustomer(
         idTransaksi: idTransaksi,
-        rating: _rating,
-        tags: _selectedTags,
+        rating: 5, // Dikirim otomatis nilai 5 karena UI rating dihapus
+        tags: [],  // Dikirim list kosong karena pilihan sikap klien dihapus
         notes: _notesController.text.trim(),
       );
 
@@ -139,7 +109,7 @@ class _VisitReportScreenState extends State<VisitReportScreen> {
         
         Future.delayed(const Duration(seconds: 1), () {
           if (mounted) {
-            Navigator.pushNamedAndRemoveUntil(context, '/home', (route) => false);
+            Navigator.pushNamedAndRemoveUntil(context, '/main', (route) => false);
           }
         });
       } else {
@@ -173,11 +143,7 @@ class _VisitReportScreenState extends State<VisitReportScreen> {
               children: [
                 _buildInfoKlien(),
                 const SizedBox(height: 20),
-                _buildRatingCard(), 
-                const SizedBox(height: 20),
                 _buildCatatanCard(),
-                const SizedBox(height: 20),
-                _buildFotoCard(),
                 const SizedBox(height: 100), 
               ],
             ),
@@ -243,82 +209,6 @@ class _VisitReportScreenState extends State<VisitReportScreen> {
     );
   }
 
-  Widget _buildRatingCard() {
-    return Container(
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(16),
-        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.04), blurRadius: 10, offset: const Offset(0, 4))],
-      ),
-      padding: const EdgeInsets.all(16),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Text('Penilaian Pelanggan', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w900, color: textDarkBrown)),
-              Text('Wajib', style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: textRequiredOrange)),
-            ],
-          ),
-          const SizedBox(height: 16),
-          
-          Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: List.generate(5, (index) {
-              return GestureDetector(
-                onTap: () => setState(() => _rating = index + 1),
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 4.0),
-                  child: Icon(
-                    index < _rating ? Icons.star_rounded : Icons.star_outline_rounded,
-                    color: index < _rating ? Colors.amber.shade500 : Colors.grey.shade300,
-                    size: 42,
-                  ),
-                ),
-              );
-            }),
-          ),
-          const SizedBox(height: 8),
-          Center(
-            child: Text(
-              _rating == 0 ? 'Ketuk bintang untuk menilai' : '$_rating dari 5 Bintang',
-              style: TextStyle(color: Colors.grey.shade600, fontSize: 13, fontWeight: FontWeight.w500),
-            ),
-          ),
-          
-          const Padding(padding: EdgeInsets.symmetric(vertical: 16), child: Divider(height: 1)),
-          
-          Text('Sikap Klien (Pilih minimal 1)', style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: textDarkBrown)),
-          const SizedBox(height: 12),
-          Wrap(
-            spacing: 8.0,
-            runSpacing: 8.0,
-            children: _availableTags.map((tag) {
-              final isSelected = _selectedTags.contains(tag);
-              return FilterChip(
-                label: Text(tag, style: TextStyle(color: isSelected ? Colors.white : textDarkBrown, fontSize: 12, fontWeight: isSelected ? FontWeight.bold : FontWeight.normal)),
-                selected: isSelected,
-                selectedColor: primaryPink,
-                backgroundColor: Colors.grey.shade100,
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(20),
-                  side: BorderSide(color: isSelected ? primaryPink : Colors.grey.shade300),
-                ),
-                onSelected: (bool selected) {
-                  setState(() {
-                    if (selected) _selectedTags.add(tag);
-                    else _selectedTags.remove(tag);
-                  });
-                },
-              );
-            }).toList(),
-          ),
-        ],
-      ),
-    );
-  }
-
   Widget _buildCatatanCard() {
     return Container(
       decoration: BoxDecoration(
@@ -367,88 +257,6 @@ class _VisitReportScreenState extends State<VisitReportScreen> {
           ),
         ],
       ),
-    );
-  }
-
-  Widget _buildFotoCard() {
-    return Container(
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(16),
-        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.04), blurRadius: 10, offset: const Offset(0, 4))],
-      ),
-      padding: const EdgeInsets.all(16),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text('Foto Pendukung (${_photos.length} Foto)', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w900, color: textDarkBrown)),
-          const SizedBox(height: 16),
-          
-          Wrap(
-            spacing: 12,
-            runSpacing: 12,
-            children: [
-              ..._photos.asMap().entries.map((entry) {
-                int index = entry.key;
-                String url = entry.value;
-                return _buildPhotoThumbnail(url, index);
-              }).toList(),
-              
-              if (_photos.length < 5) 
-                InkWell(
-                  onTap: _simulasikanTambahFoto,
-                  borderRadius: BorderRadius.circular(12),
-                  child: Container(
-                    width: 80,
-                    height: 80,
-                    decoration: BoxDecoration(
-                      color: Colors.grey.shade200,
-                      borderRadius: BorderRadius.circular(12),
-                      border: Border.all(color: Colors.grey.shade300),
-                    ),
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Icon(Icons.add_a_photo, color: textDarkBrown, size: 24),
-                        const SizedBox(height: 6),
-                        Text('Tambah', style: TextStyle(fontSize: 12, color: textDarkBrown, fontWeight: FontWeight.w600)),
-                      ],
-                    ),
-                  ),
-                ),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildPhotoThumbnail(String url, int index) {
-    return Stack(
-      children: [
-        Container(
-          width: 80,
-          height: 80,
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(12),
-            image: DecorationImage(image: NetworkImage(url), fit: BoxFit.cover),
-          ),
-        ),
-        Positioned(
-          top: -4,
-          right: -4,
-          child: IconButton(
-            icon: Container(
-              padding: const EdgeInsets.all(2),
-              decoration: const BoxDecoration(color: Colors.red, shape: BoxShape.circle),
-              child: const Icon(Icons.close, color: Colors.white, size: 14),
-            ),
-            onPressed: () => _hapusFoto(index),
-            constraints: const BoxConstraints(),
-            padding: EdgeInsets.zero,
-          ),
-        ),
-      ],
     );
   }
 

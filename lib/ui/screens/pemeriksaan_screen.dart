@@ -107,7 +107,8 @@ class _PemeriksaanScreenState extends State<PemeriksaanScreen> {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: const Text('Data pemeriksaan berhasil disimpan!'), backgroundColor: buttonColor)
         );
-        Navigator.pop(context); // Kembali ke layar detail booking
+        // 🔴 UPDATE: Kirim nilai 'success' ke halaman Detail Booking
+        Navigator.pop(context, 'success'); 
       } else {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text(result['message'] ?? 'Gagal menyimpan'), backgroundColor: Colors.redAccent)
@@ -154,7 +155,8 @@ class _PemeriksaanScreenState extends State<PemeriksaanScreen> {
                         child: Row(
                           children: [
                             GestureDetector(
-                              onTap: () => Navigator.pop(context), 
+                              // 🔴 UPDATE: Jika tombol Back panah ditekan, kirim 'back'
+                              onTap: () => Navigator.pop(context, 'back'), 
                               child: Icon(Icons.arrow_back_ios_new, color: textDark, size: 20)
                             ),
                             const SizedBox(width: 16),
@@ -216,7 +218,8 @@ class _PemeriksaanScreenState extends State<PemeriksaanScreen> {
               Expanded(
                 flex: 1,
                 child: OutlinedButton(
-                  onPressed: _isLoading ? null : () => Navigator.pop(context),
+                  // 🔴 UPDATE: Jika tombol Skip ditekan, kirim nilai string 'skipped'
+                  onPressed: _isLoading ? null : () => Navigator.pop(context, 'skipped'),
                   style: OutlinedButton.styleFrom(
                     side: BorderSide(color: buttonColor, width: 2), 
                     padding: const EdgeInsets.symmetric(vertical: 16), 

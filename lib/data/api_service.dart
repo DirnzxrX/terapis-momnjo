@@ -81,7 +81,7 @@ class ApiService {
   }
 
   Future<Map<String, dynamic>> getActiveJobs({String? search}) async {
-    return await getJobs(status: 'open', search: search);
+    return await getJobs(search: search); 
   }
 
   // =========================================================================
@@ -176,7 +176,6 @@ class ApiService {
     try {
       http.Response response;
 
-      // JIKA ADA FOTO -> GUNAKAN MULTIPART REQUEST (FORM-DATA)
       if (imagePath != null && imagePath.isNotEmpty) {
         var request = http.MultipartRequest('POST', Uri.parse(url));
         request.headers['Authorization'] = 'Bearer $token';
@@ -185,17 +184,13 @@ class ApiService {
         request.fields['id_booking'] = idBooking;
         request.fields['status'] = newStatus;
         
-        // Menambahkan file foto ke request
-        // Pastikan key 'image' ini sesuai dengan nama parameter yang diharapkan backend PHP (misal: $_FILES['image'])
         request.files.add(await http.MultipartFile.fromPath('image', imagePath)); 
 
         _logDebug(url: url, method: "POST (Multipart)", requestBody: request.fields, statusCode: 0, responseBody: "Mengirim foto...");
 
         var streamedResponse = await request.send();
         response = await http.Response.fromStream(streamedResponse);
-      } 
-      // JIKA TIDAK ADA FOTO -> GUNAKAN JSON POST SEPERTI BIASA
-      else {
+      } else {
         final Map<String, dynamic> body = {
           'id_booking': idBooking,
           'status': newStatus,
@@ -216,6 +211,9 @@ class ApiService {
 
       if (response.statusCode == 200 || response.statusCode == 201) {
         return json.decode(response.body);
+      } else if (response.statusCode == 401) {
+        await logout();
+        return {'success': false, 'message': 'Unauthorized. Token tidak valid atau kadaluarsa.'};
       }
       
       try {
@@ -420,60 +418,6 @@ class ApiService {
   }
 
   // =========================================================================
-  // 🔥 8. GET DATA PENDAPATAN (EARNINGS) - UPDATED SESUAI DOKUMENTASI BACKEND
-  // =========================================================================
-  Future<Map<String, dynamic>> getEarningsData({String? startDate, String? endDate}) async {
-    final String? token = await _getToken();
-    if (token == null) return {'success': false, 'message': 'Token tidak ditemukan'};
-
-    final Map<String, String> queryParams = {};
-    if (startDate != null && startDate.isNotEmpty) queryParams['start_date'] = startDate;
-    if (endDate != null && endDate.isNotEmpty) queryParams['end_date'] = endDate;
-
-    final uri = Uri.parse('$baseUrl/api_terapis/get_earnings.php')
-        .replace(queryParameters: queryParams.isNotEmpty ? queryParams : null);
-
-    try {
-      final response = await http.get(
-        uri,
-        headers: {
-          'Content-Type': 'application/json',
-          'Accept': 'application/json',
-          'Authorization': 'Bearer $token',
-        },
-      );
-
-      _logDebug(url: uri.toString(), method: "GET", statusCode: response.statusCode, responseBody: response.body);
-
-      // Coba decode JSON, apa pun status code-nya (karena backend sekarang selalu kirim JSON)
-      Map<String, dynamic> responseData = {};
-      try {
-        responseData = json.decode(response.body);
-      } catch (_) {}
-
-      // Tangani khusus jika token expired
-      if (response.statusCode == 401) {
-        await logout(); // Otomatis hapus sesi
-        return {
-          'success': false, 
-          'message': responseData['message'] ?? 'Sesi habis, silakan login lagi.', 
-          'isUnauthorized': true
-        };
-      }
-
-      // Jika berhasil decode JSON (baik sukses maupun error dari PHP), langsung kembalikan ke UI
-      if (responseData.containsKey('success')) {
-        return responseData;
-      }
-
-      // Fallback jika ternyata body bukan JSON
-      return {'success': false, 'message': 'Gagal terhubung ke server (Status: ${response.statusCode})'};
-    } catch (e) {
-      return {'success': false, 'message': 'Kesalahan jaringan: $e'};
-    }
-  }
-
-  // =========================================================================
   // 9. LOGIN
   // =========================================================================
   Future<Map<String, dynamic>> login(String username, String password) async {
@@ -520,5 +464,233 @@ class ApiService {
     final prefs = await SharedPreferences.getInstance();
     await prefs.clear(); // Bersihkan semua data sesi
     debugPrint("------------------- 🚀 API LOG: LOGOUT LOCAL SUCCESS 🚀 -------------------");
+  }
+
+  // =========================================================================
+  // 🔥 11. MENGAMBIL SALDO TERAPIS (GET BALANCE) 
+  // =========================================================================
+  Future<Map<String, dynamic>> getBalance({
+    String? source,
+    String? startDate,
+    String? endDate,
+  }) async {
+    final String? token = await _getToken();
+    if (token == null) return {'success': false, 'message': 'Token tidak ditemukan'};
+
+    final Map<String, String> queryParams = {};
+    if (source != null && source.isNotEmpty) queryParams['source'] = source;
+    if (startDate != null && startDate.isNotEmpty) queryParams['start_date'] = startDate;
+    if (endDate != null && endDate.isNotEmpty) queryParams['end_date'] = endDate;
+
+    final uri = Uri.parse('$baseUrl/api_terapis/get_balance.php')
+        .replace(queryParameters: queryParams.isNotEmpty ? queryParams : null);
+
+    try {
+      final response = await http.get(
+        uri,
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json',
+          'Authorization': 'Bearer $token',
+        },
+      );
+
+      _logDebug(url: uri.toString(), method: "GET", statusCode: response.statusCode, responseBody: response.body);
+
+      if (response.statusCode == 200) {
+        return json.decode(response.body);
+      } else if (response.statusCode == 401) {
+        await logout();
+        return {'success': false, 'message': 'Sesi habis, silakan login lagi.'};
+      }
+      
+      try {
+        final errorData = json.decode(response.body);
+        return {'success': false, 'message': errorData['message'] ?? 'Gagal mengambil saldo.'};
+      } catch (_) {
+        return {'success': false, 'message': 'Gagal mengambil saldo (Status: ${response.statusCode})'};
+      }
+    } catch (e) {
+      return {'success': false, 'message': 'Kesalahan jaringan: $e'};
+    }
+  }
+
+  // =========================================================================
+  // 🔥 12. SUBMIT PENARIKAN DANA (PAYOUT REQUEST)
+  // =========================================================================
+  Future<Map<String, dynamic>> submitPayoutRequest({
+    required String jenisPayout,
+    required int amount,
+    required String bank,
+    required String accountNumber,
+    required String accountName,
+    String? notes,
+  }) async {
+    final String? token = await _getToken();
+    if (token == null) return {'success': false, 'message': 'Token tidak ditemukan'};
+
+    final String url = '$baseUrl/api_terapis/request_payout.php';
+    
+    final Map<String, dynamic> body = {
+      'jenis_payout': jenisPayout,
+      'requested_amount': amount,
+      'bank_account': bank,
+      'account_number': accountNumber,
+      'account_holder_name': accountName,
+      if (notes != null && notes.isNotEmpty) 'note': notes,
+    };
+
+    try {
+      final response = await http.post(
+        Uri.parse(url), 
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json',
+          'Authorization': 'Bearer $token',
+        },
+        body: json.encode(body),
+      );
+
+      _logDebug(url: url, method: "POST", requestBody: body, statusCode: response.statusCode, responseBody: response.body);
+
+      if (response.statusCode == 200 || response.statusCode == 201) {
+        return json.decode(response.body);
+      }
+      
+      try {
+        final errorData = json.decode(response.body);
+        return {
+          'success': false, 
+          'status': errorData['status'], 
+          'message': errorData['message'] ?? 'Gagal memproses penarikan.'
+        };
+      } catch (_) {
+        return {'success': false, 'message': 'Gagal memproses penarikan (Status: ${response.statusCode})'};
+      }
+    } catch (e) {
+      return {'success': false, 'message': 'Kesalahan jaringan: $e'};
+    }
+  }
+
+  // =========================================================================
+  // 🔥 13. MENGAMBIL RIWAYAT PENARIKAN (PAYOUT HISTORY)
+  // =========================================================================
+  Future<Map<String, dynamic>> getPayoutHistory({String? status}) async {
+    final String? token = await _getToken();
+    if (token == null) return {'success': false, 'message': 'Token tidak ditemukan'};
+
+    final Map<String, String> queryParams = {};
+    if (status != null && status.isNotEmpty) queryParams['status'] = status;
+
+    final uri = Uri.parse('$baseUrl/api_terapis/get_payout_history.php')
+        .replace(queryParameters: queryParams.isNotEmpty ? queryParams : null);
+
+    try {
+      final response = await http.get(
+        uri,
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json',
+          'Authorization': 'Bearer $token',
+        },
+      );
+
+      _logDebug(url: uri.toString(), method: "GET", statusCode: response.statusCode, responseBody: response.body);
+
+      if (response.statusCode == 200) {
+        return json.decode(response.body);
+      } else if (response.statusCode == 401) {
+        await logout();
+        return {'success': false, 'message': 'Sesi habis, silakan login lagi.'};
+      }
+      
+      try {
+        final errorData = json.decode(response.body);
+        return {'success': false, 'message': errorData['message'] ?? 'Gagal mengambil riwayat penarikan dana.'};
+      } catch (_) {
+        return {'success': false, 'message': 'Gagal mengambil riwayat penarikan dana (Status: ${response.statusCode})'};
+      }
+    } catch (e) {
+      return {'success': false, 'message': 'Kesalahan jaringan: $e'};
+    }
+  }
+
+  // =========================================================================
+  // 🔥 14. MENGAMBIL DETAIL PENARIKAN (PAYOUT DETAIL)
+  // =========================================================================
+  Future<Map<String, dynamic>> getPayoutDetail(int idPayout) async {
+    final String? token = await _getToken();
+    if (token == null) return {'success': false, 'message': 'Token tidak ditemukan'};
+
+    final String url = '$baseUrl/api_terapis/get_detail_payout.php?id_payout=$idPayout';
+
+    try {
+      final response = await http.get(
+        Uri.parse(url),
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json',
+          'Authorization': 'Bearer $token',
+        },
+      );
+
+      _logDebug(url: url, method: "GET", statusCode: response.statusCode, responseBody: response.body);
+
+      if (response.statusCode == 200 || response.statusCode == 400 || response.statusCode == 403 || response.statusCode == 404) {
+        return json.decode(response.body);
+      } else if (response.statusCode == 401) {
+        await logout();
+        return {'success': false, 'message': 'Sesi habis, silakan login lagi.'};
+      }
+
+      try {
+        final errorData = json.decode(response.body);
+        return {'success': false, 'message': errorData['message'] ?? 'Gagal mengambil detail penarikan dana.'};
+      } catch (_) {
+        return {'success': false, 'message': 'Gagal mengambil detail penarikan dana (Status: ${response.statusCode})'};
+      }
+    } catch (e) {
+      return {'success': false, 'message': 'Kesalahan jaringan: $e'};
+    }
+  }
+
+  // =========================================================================
+  // 🔥 15. MENGAMBIL PROFIL TERAPIS (GET PROFILE) - BARU DITAMBAHKAN
+  // =========================================================================
+  Future<Map<String, dynamic>> getProfile() async {
+    final String? token = await _getToken();
+    if (token == null) return {'success': false, 'message': 'Token tidak ditemukan'};
+
+    final String url = '$baseUrl/api_terapis/get_profile.php';
+
+    try {
+      final response = await http.get(
+        Uri.parse(url),
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json',
+          'Authorization': 'Bearer $token',
+        },
+      );
+
+      _logDebug(url: url, method: "GET", statusCode: response.statusCode, responseBody: response.body);
+
+      // Sesuai dokumentasi: 200 untuk OK, 401 untuk Unauthorized, 404 untuk Not Found
+      if (response.statusCode == 200 || response.statusCode == 404) {
+        return json.decode(response.body);
+      } else if (response.statusCode == 401) {
+        await logout(); // Jika Unauthorized / token mati, paksa logout lokal
+        return {'success': false, 'message': 'Sesi habis, silakan login lagi.'};
+      }
+
+      try {
+        final errorData = json.decode(response.body);
+        return {'success': false, 'message': errorData['message'] ?? 'Gagal mengambil profil.'};
+      } catch (_) {
+        return {'success': false, 'message': 'Gagal mengambil profil (Status: ${response.statusCode})'};
+      }
+    } catch (e) {
+      return {'success': false, 'message': 'Kesalahan jaringan: $e'};
+    }
   }
 }
