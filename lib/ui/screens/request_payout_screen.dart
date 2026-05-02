@@ -31,7 +31,6 @@ class _RequestPayoutScreenState extends State<RequestPayoutScreen> {
   // --- STATE API ---
   bool _isLoadingBalance = true;
   bool _isSubmitting = false;
-<<<<<<< HEAD
   
   // 🔥 STATE BARU UNTUK MEMISAHKAN SALDO
   int _availableBalance = 0; // Nominal yang tampil di layar
@@ -39,9 +38,6 @@ class _RequestPayoutScreenState extends State<RequestPayoutScreen> {
   int _saldoPaket = 0; // Nominal asli paket
 
   bool _isInit = true; // Penanda untuk membaca argumen pertama kali
-=======
-  int _availableBalance = 0; 
->>>>>>> a4a88a7476ffafaf62c4dede4b1fb76d822acc54
 
   @override
   void initState() {
@@ -94,10 +90,9 @@ class _RequestPayoutScreenState extends State<RequestPayoutScreen> {
       if (mounted) {
         setState(() {
           if ((response['success'] == true || response['status'] == 'success') && response['data'] != null) {
-<<<<<<< HEAD
             final data = response['data'];
             
-            // 🔥 MENGAMBIL DATA MASING-MASING SEPERTI DI EARNINGS SCREEN
+            // 🔥 MENGAMBIL DATA MASING-MASING
             final Map<String, dynamic> treatmentData = data['treatment'] ?? {};
             final Map<String, dynamic> paketData = data['paket'] ?? {};
 
@@ -105,13 +100,8 @@ class _RequestPayoutScreenState extends State<RequestPayoutScreen> {
             _saldoTreatment = (double.tryParse(treatmentData['total_balance_treatment']?.toString() ?? '0') ?? 0.0).toInt();
             _saldoPaket = (double.tryParse(paketData['total_balance_paket']?.toString() ?? '0') ?? 0.0).toInt();
 
-            // Set tampilan awal sesuai dropdown yang sedang aktif (default: treatment)
+            // Set tampilan awal sesuai dropdown yang sedang aktif
             _updateDisplayedBalance();
-=======
-            // Sesuai dokumentasi backend, key sekarang adalah 'total_balance_keseluruhan'
-            double rawBalance = double.tryParse(response['data']['total_balance_keseluruhan'].toString()) ?? 0.0;
-            _availableBalance = rawBalance.toInt();
->>>>>>> a4a88a7476ffafaf62c4dede4b1fb76d822acc54
           }
           _isLoadingBalance = false;
         });
@@ -128,8 +118,7 @@ class _RequestPayoutScreenState extends State<RequestPayoutScreen> {
     }
   }
 
-<<<<<<< HEAD
-  // 🔥 FUNGSI BARU UNTUK MERUBAH TAMPILAN SALDO SAAT DROPDOWN DIUBAH
+  // 🔥 FUNGSI UNTUK MERUBAH TAMPILAN SALDO SAAT DROPDOWN DIUBAH
   void _updateDisplayedBalance() {
     setState(() {
       if (_selectedJenisPayout == 'treatment') {
@@ -140,8 +129,6 @@ class _RequestPayoutScreenState extends State<RequestPayoutScreen> {
     });
   }
 
-=======
->>>>>>> a4a88a7476ffafaf62c4dede4b1fb76d822acc54
   // --- FUNGSI FORMAT RUPIAH MANUAL ---
   String _formatRupiah(int value) {
     String number = value.toString();
@@ -180,11 +167,7 @@ class _RequestPayoutScreenState extends State<RequestPayoutScreen> {
     String rawAmount = _amountController.text.replaceAll('.', '');
     int amountToSubmit = int.tryParse(rawAmount) ?? 0;
 
-<<<<<<< HEAD
     // Validasi Saldo Cukup berdasarkan saldo dinamis yang sedang tampil
-=======
-    // Validasi Saldo Cukup (Sementara validasi secara global, backend akan menolak jika saldo jenis spesifik tidak cukup)
->>>>>>> a4a88a7476ffafaf62c4dede4b1fb76d822acc54
     if (amountToSubmit > _availableBalance) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
@@ -201,10 +184,6 @@ class _RequestPayoutScreenState extends State<RequestPayoutScreen> {
 
     try {
       final api = ApiService();
-<<<<<<< HEAD
-=======
-      // 🔥 FIX: Menambahkan parameter jenisPayout yang diwajibkan
->>>>>>> a4a88a7476ffafaf62c4dede4b1fb76d822acc54
       final response = await api.submitPayoutRequest(
         jenisPayout: _selectedJenisPayout, 
         amount: amountToSubmit,
@@ -298,10 +277,6 @@ class _RequestPayoutScreenState extends State<RequestPayoutScreen> {
                 _buildBalanceCard(),
                 const SizedBox(height: 24),
                 
-<<<<<<< HEAD
-=======
-                // 🔥 TAMBAHAN BARU: Dropdown Sumber Saldo
->>>>>>> a4a88a7476ffafaf62c4dede4b1fb76d822acc54
                 Text('Sumber Saldo', style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: textDarkBrown)),
                 const SizedBox(height: 8),
                 _buildJenisPayoutDropdown(),
@@ -405,7 +380,7 @@ class _RequestPayoutScreenState extends State<RequestPayoutScreen> {
     );
   }
 
-  // Widget baru untuk Dropdown Jenis Saldo
+  // Widget Dropdown Jenis Saldo
   Widget _buildJenisPayoutDropdown() {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
@@ -428,11 +403,8 @@ class _RequestPayoutScreenState extends State<RequestPayoutScreen> {
             if (newValue != null) {
               setState(() {
                 _selectedJenisPayout = newValue;
-<<<<<<< HEAD
-                // 🔥 PANGGIL FUNGSI INI AGAR SALDO OTOMATIS BERUBAH
+                // PANGGIL FUNGSI INI AGAR SALDO OTOMATIS BERUBAH
                 _updateDisplayedBalance();
-=======
->>>>>>> a4a88a7476ffafaf62c4dede4b1fb76d822acc54
               });
             }
           },

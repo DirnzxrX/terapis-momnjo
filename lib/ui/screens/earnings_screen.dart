@@ -26,25 +26,12 @@ class _EarningsScreenState extends State<EarningsScreen> {
   double _pendapatanKotorTreatment = 0;
   double _pendapatanBersihTreatment = 0;
   double _totalPenjualanPaket = 0;
-<<<<<<< HEAD
-=======
-  double _komisiPaket = 0;
-  List<dynamic> _rincianPaket = [];
-
-  // Payout History Data
-  List<dynamic> _payoutHistory = [];
-
-  // Periode Data
-  String _startDate = '';
-  String _endDate = '';
->>>>>>> a4a88a7476ffafaf62c4dede4b1fb76d822acc54
   
   // --- VARIABEL LIST RIWAYAT ---
   List<dynamic> _rincianTreatment = []; 
   List<dynamic> _rincianPaket = [];
   List<dynamic> _payoutHistory = [];
 
-<<<<<<< HEAD
   // State DateRange untuk Filter
   DateTimeRange? _selectedDateRange;
 
@@ -58,34 +45,6 @@ class _EarningsScreenState extends State<EarningsScreen> {
 
   void _fetchAllData() {
     _fetchEarningsData();
-=======
-  @override
-  void initState() {
-    super.initState();
-    
-    // 🔥 SET DEFAULT PERIODE: Bulan Berjalan
-    final now = DateTime.now();
-    _selectedDateRange = DateTimeRange(
-      start: DateTime(now.year, now.month, 1),
-      end: DateTime(now.year, now.month + 1, 0), // Hari terakhir bulan ini
-    );
-
-    // Ambil data pertama kali berdasarkan range default
-    _fetchDataForSelectedRange();
-  }
-
-  // 🔥 FUNGSI PEMBANTU UNTUK MEMANGGIL API BERDASARKAN FILTER
-  void _fetchDataForSelectedRange() {
-    if (_selectedDateRange != null) {
-      String start = DateFormat('yyyy-MM-dd').format(_selectedDateRange!.start);
-      String end = DateFormat('yyyy-MM-dd').format(_selectedDateRange!.end);
-      _fetchEarningsData(start: start, end: end);
-    } else {
-      _fetchEarningsData();
-    }
-    
-    // Panggil juga API Riwayat Payout
->>>>>>> a4a88a7476ffafaf62c4dede4b1fb76d822acc54
     _fetchPayoutHistory();
   }
 
@@ -130,14 +89,8 @@ class _EarningsScreenState extends State<EarningsScreen> {
       setState(() {
         _selectedDateRange = picked;
       });
-<<<<<<< HEAD
       // Panggil ulang API untuk update data Omset saja
       _fetchEarningsData();
-=======
-      
-      // Panggil data dengan tanggal yang baru dipilih
-      _fetchDataForSelectedRange();
->>>>>>> a4a88a7476ffafaf62c4dede4b1fb76d822acc54
     }
   }
 
@@ -146,43 +99,11 @@ class _EarningsScreenState extends State<EarningsScreen> {
     setState(() => _isLoading = true);
     
     try {
-<<<<<<< HEAD
       // 1. SELALU AMBIL DATA ALL-TIME UNTUK KOTAK PINK (PAYOUT)
       final respAllTime = await ApiService().getBalance();
       Map<String, dynamic> dataAllTime = {};
       if (respAllTime['status'] == 'success' || respAllTime['success'] == true) {
         dataAllTime = respAllTime['data'] ?? {};
-=======
-      final response = await ApiService().getBalance(startDate: start, endDate: end);
-
-      if (response['status'] == 'success' || response['success'] == true) {
-        final data = response['data'] ?? {};
-
-        setState(() {
-          _totalKomisi = _parseDouble(data['total_balance_keseluruhan']);
-          
-          final Map<String, dynamic> treatmentData = data['treatment'] ?? {};
-          final Map<String, dynamic> paketData = data['paket'] ?? {};
-          
-          // Parsing Treatment
-          _pendapatanKotorTreatment = _parseDouble(treatmentData['pendapatan_sebelum_diskon']);
-          _pendapatanBersihTreatment = _parseDouble(treatmentData['pendapatan_setelah_diskon']);
-          _komisiTreatment = _parseDouble(treatmentData['komisi_treatment']);
-          _rincianTreatment = treatmentData['rincian_treatment'] ?? data['rincian_treatment'] ?? []; 
-
-          // Parsing Paket
-          _totalPenjualanPaket = _parseDouble(paketData['harga_paket']);
-          _komisiPaket = _parseDouble(paketData['komisi_paket']);
-          _rincianPaket = paketData['rincian_paket'] ?? data['rincian_paket'] ?? [];
-          
-          _startDate = data['periode']?['start_date'] ?? '';
-          _endDate = data['periode']?['end_date'] ?? '';
-
-          _isLoading = false;
-        });
-      } else {
-        _showError(response['message'] ?? 'Gagal mengambil data pendapatan');
->>>>>>> a4a88a7476ffafaf62c4dede4b1fb76d822acc54
       }
 
       // 2. AMBIL DATA FILTER JIKA TANGGAL DIPILIH UNTUK OMSET
@@ -219,7 +140,6 @@ class _EarningsScreenState extends State<EarningsScreen> {
     }
   }
 
-<<<<<<< HEAD
   // --- FUNGSI TARIK API RIWAYAT PENARIKAN (PAYOUT) & RINCIAN TREATMENT ---
   Future<void> _fetchPayoutHistory() async {
     try {
@@ -247,16 +167,6 @@ class _EarningsScreenState extends State<EarningsScreen> {
               _rincianTreatment = treatmentData['rincian_treatment'] ?? balanceInfo['rincian_treatment'] ?? [];
               _rincianPaket = paketData['rincian_paket'] ?? balanceInfo['rincian_paket'] ?? [];
             }
-=======
-  // --- FUNGSI TARIK API RIWAYAT PENARIKAN (PAYOUT) ---
-  Future<void> _fetchPayoutHistory() async {
-    try {
-      final response = await ApiService().getPayoutHistory();
-      if (response['status'] == 'success' || response['success'] == true) {
-        if (mounted) {
-          setState(() {
-            _payoutHistory = response['data'] ?? [];
->>>>>>> a4a88a7476ffafaf62c4dede4b1fb76d822acc54
           });
         }
       }
@@ -327,11 +237,7 @@ class _EarningsScreenState extends State<EarningsScreen> {
                   ),
                   IconButton(
                     icon: Icon(Icons.refresh, color: Colors.grey.shade700, size: 26),
-<<<<<<< HEAD
                     onPressed: _fetchAllData, 
-=======
-                    onPressed: _fetchDataForSelectedRange, 
->>>>>>> a4a88a7476ffafaf62c4dede4b1fb76d822acc54
                     padding: EdgeInsets.zero,
                     constraints: const BoxConstraints(),
                   ),
@@ -339,11 +245,7 @@ class _EarningsScreenState extends State<EarningsScreen> {
               ),
             ),
 
-<<<<<<< HEAD
             // 2. Row Periode (Mendukung Penghapusan Filter)
-=======
-            // 2. Row Periode (Disembunyikan jika di tab Riwayat Payout)
->>>>>>> a4a88a7476ffafaf62c4dede4b1fb76d822acc54
             if (_selectedTab != 'Riwayat Payout')
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 20.0),
@@ -426,13 +328,8 @@ class _EarningsScreenState extends State<EarningsScreen> {
   }
 
   Widget _buildEarningsCard() {
-<<<<<<< HEAD
     String mainTitle = _selectedTab == 'Treatment' ? 'Total Komisi Treatment' : 'Total Komisi Paket';
     double mainAmount = _selectedTab == 'Treatment' ? _komisiTreatmentAllTime : _komisiPaketAllTime;
-=======
-    String mainTitle = _selectedTab == 'Treatment' ? 'Komisi Treatment' : 'Komisi Paket';
-    double mainAmount = _selectedTab == 'Treatment' ? _komisiTreatment : _komisiPaket;
->>>>>>> a4a88a7476ffafaf62c4dede4b1fb76d822acc54
 
     return Container(
       key: ValueKey('EarningsCard_$_selectedTab'),
@@ -460,7 +357,6 @@ class _EarningsScreenState extends State<EarningsScreen> {
                   width: double.infinity,
                   child: ElevatedButton(
                     onPressed: () async {
-<<<<<<< HEAD
                       final result = await Navigator.pushNamed(
                         context, 
                         '/request_payout',
@@ -470,12 +366,6 @@ class _EarningsScreenState extends State<EarningsScreen> {
                       if (result == true) {
                         setState(() => _selectedTab = 'Riwayat Payout');
                         _fetchAllData(); 
-=======
-                      final result = await Navigator.pushNamed(context, '/request_payout');
-                      if (result == true) {
-                        setState(() => _selectedTab = 'Riwayat Payout');
-                        _fetchDataForSelectedRange(); // Ambil update terbaru (termasuk riwayat) setelah berhasil
->>>>>>> a4a88a7476ffafaf62c4dede4b1fb76d822acc54
                         if (mounted) {
                           ScaffoldMessenger.of(context).showSnackBar(
                             const SnackBar(content: Text('Riwayat Penarikan Dana sedang diperbarui...'), backgroundColor: Colors.green),
@@ -503,12 +393,7 @@ class _EarningsScreenState extends State<EarningsScreen> {
               mainAxisAlignment: MainAxisAlignment.spaceEvenly,
               children: _selectedTab == 'Treatment' 
                 ? [
-<<<<<<< HEAD
                     _buildSubEarning('Total Omset Keseluruhan', formatRupiah(_pendapatanKotorTreatment)),
-=======
-                    // Menggunakan pendapatan kotor
-                    _buildSubEarning('Total Omset', formatRupiah(_pendapatanKotorTreatment)),
->>>>>>> a4a88a7476ffafaf62c4dede4b1fb76d822acc54
                   ]
                 : [
                     _buildSubEarning('Total Penjualan Paket', formatRupiah(_totalPenjualanPaket)),
@@ -794,13 +679,9 @@ class _EarningsScreenState extends State<EarningsScreen> {
     );
   }
 
-  // 🔥 FUNGSI BARU UNTUK RENDER LIST RIWAYAT ASLI DARI API
   Widget _buildPayoutListView() {
-<<<<<<< HEAD
     // Bisa difilter juga (opsional), namun untuk Riwayat Payout seringkali dibiarkan semua
     // Di sini kita biarkan semua saja karena ini halaman payout history
-=======
->>>>>>> a4a88a7476ffafaf62c4dede4b1fb76d822acc54
     if (_payoutHistory.isEmpty) {
       return Center(
         child: Column(
@@ -824,10 +705,6 @@ class _EarningsScreenState extends State<EarningsScreen> {
       itemBuilder: (context, index) {
         final item = _payoutHistory[index];
         
-<<<<<<< HEAD
-=======
-        // Menerapkan UI / UX berdasarkan dokumentasi API Payout History
->>>>>>> a4a88a7476ffafaf62c4dede4b1fb76d822acc54
         final String status = (item['status'] ?? 'pending').toString().toLowerCase();
         final String idPayout = item['id_payout']?.toString() ?? '-';
         final double amount = _parseDouble(item['requested_amount']);
@@ -861,10 +738,6 @@ class _EarningsScreenState extends State<EarningsScreen> {
 
         return InkWell(
           onTap: () {
-<<<<<<< HEAD
-=======
-            // Membuka detail menggunakan item
->>>>>>> a4a88a7476ffafaf62c4dede4b1fb76d822acc54
             Navigator.pushNamed(context, '/history_detail_payout', arguments: item);
           },
           borderRadius: BorderRadius.circular(8), 
