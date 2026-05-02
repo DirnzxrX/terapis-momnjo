@@ -85,38 +85,77 @@ class ApiService {
   }
 
   // =========================================================================
-  // UPDATE STATUS TREATMENT PER-ITEM (Centang Layanan)
+  // 🔥 UPDATE STATUS SIKLUS KERJA TERAPIS (Arrived, Start, Finish)
   // =========================================================================
-  Future<Map<String, dynamic>> updateJobStatus(String idTransaksi, String productName) async {
+  Future<Map<String, dynamic>> updateJobStatus({
+    required String idTransaksi,
+    required String action, // "arrived", "start", atau "finish"
+    String? productName,
+    String? imagePath,
+  }) async {
     final String? token = await _getToken();
     if (token == null) return {'success': false, 'message': 'Token tidak ditemukan'};
 
     final String url = '$baseUrl/api_terapis/update_job_status.php';
-    final Map<String, dynamic> body = {
-      'id_transaksi': idTransaksi,
-      'product_name': productName,
-    };
 
     try {
-      final response = await http.post(
-        Uri.parse(url),
-        headers: {
-          'Content-Type': 'application/json',
-          'Accept': 'application/json',
-          'Authorization': 'Bearer $token',
-        },
-        body: json.encode(body),
-      );
+      http.Response response;
 
-      _logDebug(url: url, method: "POST", requestBody: body, statusCode: response.statusCode, responseBody: response.body);
+      // Skenario 1: Tiba di Lokasi (Multipart form-data untuk upload foto)
+      if (action == 'arrived') {
+        var request = http.MultipartRequest('POST', Uri.parse(url));
+        request.headers['Authorization'] = 'Bearer $token';
+        request.headers['Accept'] = 'application/json';
+
+        request.fields['id_transaksi'] = idTransaksi;
+        request.fields['action'] = action;
+
+        if (imagePath != null && imagePath.isNotEmpty) {
+          request.files.add(await http.MultipartFile.fromPath('image', imagePath));
+        }
+
+        _logDebug(url: url, method: "POST (Multipart)", requestBody: request.fields, statusCode: 0, responseBody: "Mengirim data tiba & foto...");
+
+        var streamedResponse = await request.send();
+        response = await http.Response.fromStream(streamedResponse);
+      } 
+      // Skenario 2 & 3: Mulai & Selesai (application/json)
+      else {
+        final Map<String, dynamic> body = {
+          'id_transaksi': idTransaksi,
+          'action': action,
+        };
+        if (productName != null && productName.isNotEmpty) {
+          body['product_name'] = productName;
+        }
+
+        response = await http.post(
+          Uri.parse(url),
+          headers: {
+            'Content-Type': 'application/json',
+            'Accept': 'application/json',
+            'Authorization': 'Bearer $token',
+          },
+          body: json.encode(body),
+        );
+      }
+
+      _logDebug(url: url, method: "POST", statusCode: response.statusCode, responseBody: response.body);
 
       if (response.statusCode == 200 || response.statusCode == 400 || response.statusCode == 401 || response.statusCode == 404) {
         try {
-          return json.decode(response.body);
+          final data = json.decode(response.body);
+          // Menyelaraskan status 'success'/'error' dari server backend menjadi boolean 'success' Flutter
+          if (data['status'] == 'success') {
+            data['success'] = true;
+          } else {
+            data['success'] = false;
+          }
+          return data;
         } catch (e) {
           String partialError = response.body;
           if (partialError.length > 100) partialError = '${partialError.substring(0, 100)}...';
-          return {'success': false, 'message': 'Server mengembalikan error PHP: $partialError'};
+          return {'success': false, 'message': 'Server mengembalikan error: $partialError'};
         }
       } else {
         return {'success': false, 'message': 'Server Error (Status: ${response.statusCode})'};
@@ -655,7 +694,7 @@ class ApiService {
   }
 
   // =========================================================================
-  // 🔥 15. MENGAMBIL PROFIL TERAPIS (GET PROFILE) - BARU DITAMBAHKAN
+  // 🔥 15. MENGAMBIL PROFIL TERAPIS (GET PROFILE)
   // =========================================================================
   Future<Map<String, dynamic>> getProfile() async {
     final String? token = await _getToken();
@@ -675,11 +714,10 @@ class ApiService {
 
       _logDebug(url: url, method: "GET", statusCode: response.statusCode, responseBody: response.body);
 
-      // Sesuai dokumentasi: 200 untuk OK, 401 untuk Unauthorized, 404 untuk Not Found
       if (response.statusCode == 200 || response.statusCode == 404) {
         return json.decode(response.body);
       } else if (response.statusCode == 401) {
-        await logout(); // Jika Unauthorized / token mati, paksa logout lokal
+        await logout(); 
         return {'success': false, 'message': 'Sesi habis, silakan login lagi.'};
       }
 
