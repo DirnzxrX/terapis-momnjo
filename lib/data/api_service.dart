@@ -694,7 +694,11 @@ class ApiService {
   }
 
   // =========================================================================
+<<<<<<< HEAD
   // 🔥 15. MENGAMBIL PROFIL TERAPIS (GET PROFILE)
+=======
+  // 🔥 15. MENGAMBIL PROFIL TERAPIS (GET PROFILE) - BARU DITAMBAHKAN
+>>>>>>> a4a88a7476ffafaf62c4dede4b1fb76d822acc54
   // =========================================================================
   Future<Map<String, dynamic>> getProfile() async {
     final String? token = await _getToken();
@@ -714,10 +718,18 @@ class ApiService {
 
       _logDebug(url: url, method: "GET", statusCode: response.statusCode, responseBody: response.body);
 
+<<<<<<< HEAD
       if (response.statusCode == 200 || response.statusCode == 404) {
         return json.decode(response.body);
       } else if (response.statusCode == 401) {
         await logout(); 
+=======
+      // Sesuai dokumentasi: 200 untuk OK, 401 untuk Unauthorized, 404 untuk Not Found
+      if (response.statusCode == 200 || response.statusCode == 404) {
+        return json.decode(response.body);
+      } else if (response.statusCode == 401) {
+        await logout(); // Jika Unauthorized / token mati, paksa logout lokal
+>>>>>>> a4a88a7476ffafaf62c4dede4b1fb76d822acc54
         return {'success': false, 'message': 'Sesi habis, silakan login lagi.'};
       }
 
