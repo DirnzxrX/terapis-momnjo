@@ -17,12 +17,12 @@ class _EarningsScreenState extends State<EarningsScreen> {
   String _selectedTab = 'Treatment'; 
   bool _isLoading = true;
 
-  // --- VARIABEL KOTAK PINK DARI API (SEBAGAI FALLBACK) ---
+  // --- VARIABEL KOTAK PINK DARI API (SISA SALDO AKTIF / AVAILABLE BALANCE) ---
   double _totalKomisiAllTime = 0;
   double _komisiTreatmentAllTime = 0;
   double _komisiPaketAllTime = 0;
 
-  // --- VARIABEL OMSET API (SEBAGAI FALLBACK) ---
+  // --- VARIABEL OMSET API ---
   double _pendapatanKotorTreatment = 0;
   double _totalPenjualanPaket = 0;
   
@@ -37,7 +37,6 @@ class _EarningsScreenState extends State<EarningsScreen> {
   @override
   void initState() {
     super.initState();
-    // 🔥 PERMINTAAN: Default awal adalah Semua Waktu (Tanpa Filter)
     _selectedDateRange = null; 
     _fetchAllData();
   }
@@ -59,7 +58,7 @@ class _EarningsScreenState extends State<EarningsScreen> {
     return NumberFormat.currency(locale: 'id_ID', symbol: 'Rp ', decimalDigits: 0).format(amount);
   }
 
-  // 🔥 BUKA KALENDER FILTER PERIODE
+  // BUKA KALENDER FILTER PERIODE
   Future<void> _pickDateRange() async {
     final DateTime now = DateTime.now();
     final DateTime firstDate = DateTime(2020);
@@ -88,7 +87,7 @@ class _EarningsScreenState extends State<EarningsScreen> {
       setState(() {
         _selectedDateRange = picked;
       });
-      // Panggil ulang API untuk update data Omset saja
+      // Panggil ulang API untuk update data Omset saja saat difilter
       _fetchEarningsData();
     }
   }
@@ -98,7 +97,7 @@ class _EarningsScreenState extends State<EarningsScreen> {
     setState(() => _isLoading = true);
     
     try {
-      // 1. SELALU AMBIL DATA ALL-TIME UNTUK KOTAK PINK (PAYOUT)
+      // 1. SELALU AMBIL DATA ALL-TIME UNTUK KOTAK PINK (PAYOUT / AVAILABLE BALANCE)
       final respAllTime = await ApiService().getBalance();
       Map<String, dynamic> dataAllTime = {};
       if (respAllTime['status'] == 'success' || respAllTime['success'] == true) {
@@ -117,18 +116,22 @@ class _EarningsScreenState extends State<EarningsScreen> {
       }
 
       setState(() {
-        // --- DATA KOTAK PINK (JANGAN BERUBAH OLEH FILTER TANGGAL) ---
-        _totalKomisiAllTime = _parseDouble(dataAllTime['total_balance_keseluruhan']);
+        // 🔥 PERBAIKAN: Fokus mengambil data "available_balance" atau "total_balance" asli dari server
+        _totalKomisiAllTime = _parseDouble(dataAllTime['total_balance_keseluruhan'] ?? dataAllTime['available_balance'] ?? dataAllTime['total_balance']);
+        
         final Map<String, dynamic> tAllTime = dataAllTime['treatment'] ?? {};
         final Map<String, dynamic> pAllTime = dataAllTime['paket'] ?? {};
-        _komisiTreatmentAllTime = _parseDouble(tAllTime['total_balance_treatment'] ?? tAllTime['komisi_treatment']);
-        _komisiPaketAllTime = _parseDouble(pAllTime['total_balance_paket'] ?? pAllTime['komisi_paket']);
+        
+        // Kotak Pink Treatment
+        _komisiTreatmentAllTime = _parseDouble(tAllTime['total_balance_treatment'] ?? tAllTime['available_balance'] ?? tAllTime['komisi_treatment']);
+        // Kotak Pink Paket
+        _komisiPaketAllTime = _parseDouble(pAllTime['total_balance_paket'] ?? pAllTime['available_balance'] ?? pAllTime['komisi_paket']);
         
         // --- DATA OMSET DI BAWAH KOTAK PINK (TERPENGARUH FILTER) ---
         final Map<String, dynamic> tFiltered = dataFiltered['treatment'] ?? {};
         final Map<String, dynamic> pFiltered = dataFiltered['paket'] ?? {};
-        _pendapatanKotorTreatment = _parseDouble(tFiltered['pendapatan_sebelum_diskon']);
-        _totalPenjualanPaket = _parseDouble(pFiltered['harga_paket']);
+        _pendapatanKotorTreatment = _parseDouble(tFiltered['pendapatan_sebelum_diskon'] ?? tFiltered['total_omset']);
+        _totalPenjualanPaket = _parseDouble(pFiltered['harga_paket'] ?? pFiltered['total_omset']);
         
         _isLoading = false;
       });
@@ -192,13 +195,13 @@ class _EarningsScreenState extends State<EarningsScreen> {
     return '$start - $end';
   }
 
-  // 🔥 FUNGSI FILTER LIST LOKAL AGAR DAFTAR SESUAI TANGGAL YANG DIPILIH
+  // FUNGSI FILTER LIST LOKAL AGAR DAFTAR SESUAI TANGGAL YANG DIPILIH
   List<dynamic> _filterListByDate(List<dynamic> list, String dateFieldKey) {
     if (_selectedDateRange == null) return list; // Kembalikan semua jika tidak ada filter
     
     return list.where((item) {
       String tgl = item[dateFieldKey] ?? item['created_at'] ?? '';
-      if (tgl.isEmpty) return true; // Tampilkan saja jika tidak ada data tanggal
+      if (tgl.isEmpty) return true; 
       
       try {
         DateTime dt = DateTime.parse(tgl);
@@ -243,8 +246,8 @@ class _EarningsScreenState extends State<EarningsScreen> {
               ),
             ),
 
-            // 2. Row Periode (Mendukung Penghapusan Filter)
-            if (_selectedTab != 'Riwayat Payout')
+            // 2. Row Periode (Tidak tampil di tab Riwayat Penarikan)
+            if (_selectedTab != 'Riwayat Penarikan')
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 20.0),
                 child: Row(
@@ -296,7 +299,7 @@ class _EarningsScreenState extends State<EarningsScreen> {
               transitionBuilder: (Widget child, Animation<double> animation) {
                 return FadeTransition(opacity: animation, child: child);
               },
-              child: _selectedTab == 'Riwayat Payout' ? _buildPayoutCard() : _buildEarningsCard(),
+              child: _selectedTab == 'Riwayat Penarikan' ? _buildPayoutCard() : _buildEarningsCard(),
             ),
             
             const SizedBox(height: 24),
@@ -329,46 +332,8 @@ class _EarningsScreenState extends State<EarningsScreen> {
     String mainTitle = _selectedTab == 'Treatment' ? 'Total Komisi Treatment' : 'Total Komisi Paket';
     String subTitle = _selectedTab == 'Treatment' ? 'Total Omset Keseluruhan' : 'Total Penjualan Paket';
     
-    // 🔥 PERBAIKAN: Hitung jumlah Omset dan Komisi 100% dari data yang ada di list (Dinamis & Pasti Akurat)
-    double calculatedKomisi = 0;
-    double calculatedOmset = 0;
-
-    if (_selectedTab == 'Treatment') {
-      final filteredList = _filterListByDate(_rincianTreatment, 'tgl_dokumen');
-      for (var item in filteredList) {
-        double omsetItem = _parseDouble(item['pendapatan_sebelum_diskon']);
-        double komisiItem = _parseDouble(item['komisi']);
-        
-        // Terapkan 5% otomatis jika komisi 0
-        if (komisiItem <= 0 && omsetItem > 0) {
-          komisiItem = omsetItem * 0.05;
-        }
-        
-        calculatedOmset += omsetItem;
-        calculatedKomisi += komisiItem;
-      }
-      
-      // Jika kosong (karena API belum meload rincian), gunakan fallback API mentah
-      if (calculatedKomisi == 0 && _komisiTreatmentAllTime > 0) calculatedKomisi = _komisiTreatmentAllTime;
-      if (calculatedOmset == 0 && _pendapatanKotorTreatment > 0) calculatedOmset = _pendapatanKotorTreatment;
-
-    } else {
-      final filteredList = _filterListByDate(_rincianPaket, 'tgl_transaksi');
-      for (var item in filteredList) {
-        double hargaItem = _parseDouble(item['harga_paket']);
-        double komisiItem = _parseDouble(item['komisi']);
-        
-        if (komisiItem <= 0 && hargaItem > 0) {
-          komisiItem = hargaItem * 0.05;
-        }
-        
-        calculatedOmset += hargaItem;
-        calculatedKomisi += komisiItem;
-      }
-
-      if (calculatedKomisi == 0 && _komisiPaketAllTime > 0) calculatedKomisi = _komisiPaketAllTime;
-      if (calculatedOmset == 0 && _totalPenjualanPaket > 0) calculatedOmset = _totalPenjualanPaket;
-    }
+    double mainAmount = _selectedTab == 'Treatment' ? _komisiTreatmentAllTime : _komisiPaketAllTime;
+    double omsetAmount = _selectedTab == 'Treatment' ? _pendapatanKotorTreatment : _totalPenjualanPaket;
 
     return Container(
       key: ValueKey('EarningsCard_$_selectedTab'),
@@ -388,10 +353,9 @@ class _EarningsScreenState extends State<EarningsScreen> {
               children: [
                 Text(mainTitle, style: TextStyle(color: Colors.white.withOpacity(0.9), fontSize: 13, fontWeight: FontWeight.w500)),
                 const SizedBox(height: 8),
-                // Tampilkan hasil hitungan dinamis
-                Text(formatRupiah(calculatedKomisi), style: const TextStyle(color: Colors.white, fontSize: 32, fontWeight: FontWeight.bold)),
+                Text(formatRupiah(mainAmount), style: const TextStyle(color: Colors.white, fontSize: 32, fontWeight: FontWeight.bold)),
                 
-                // 🔥 TOMBOL REQUEST PAYOUT
+                // TOMBOL REQUEST PAYOUT
                 const SizedBox(height: 16),
                 SizedBox(
                   width: double.infinity,
@@ -404,7 +368,7 @@ class _EarningsScreenState extends State<EarningsScreen> {
                       );
                       
                       if (result == true) {
-                        setState(() => _selectedTab = 'Riwayat Payout');
+                        setState(() => _selectedTab = 'Riwayat Penarikan');
                         _fetchAllData(); 
                         if (mounted) {
                           ScaffoldMessenger.of(context).showSnackBar(
@@ -419,7 +383,7 @@ class _EarningsScreenState extends State<EarningsScreen> {
                       padding: const EdgeInsets.symmetric(vertical: 14),
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                     ),
-                    child: const Text(' Request Payout ', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14)),
+                    child: const Text(' Permohonan Penarikan ', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14)),
                   ),
                 ),
               ],
@@ -432,7 +396,7 @@ class _EarningsScreenState extends State<EarningsScreen> {
             child: Row(
               mainAxisAlignment: MainAxisAlignment.spaceEvenly,
               children: [
-                _buildSubEarning(subTitle, formatRupiah(calculatedOmset)),
+                _buildSubEarning(subTitle, formatRupiah(omsetAmount)),
               ],
             ),
           ),
@@ -442,26 +406,8 @@ class _EarningsScreenState extends State<EarningsScreen> {
   }
 
   Widget _buildPayoutCard() {
-    // Sama seperti di atas, kita pastikan angka total keseluruhan komisi juga dihitung bersih dari daftar 5%
-    double calculatedTotalKeseluruhan = 0;
-    
-    for (var item in _rincianTreatment) {
-      double omset = _parseDouble(item['pendapatan_sebelum_diskon']);
-      double komisi = _parseDouble(item['komisi']);
-      if (komisi <= 0 && omset > 0) komisi = omset * 0.05;
-      calculatedTotalKeseluruhan += komisi;
-    }
-    for (var item in _rincianPaket) {
-      double harga = _parseDouble(item['harga_paket']);
-      double komisi = _parseDouble(item['komisi']);
-      if (komisi <= 0 && harga > 0) komisi = harga * 0.05;
-      calculatedTotalKeseluruhan += komisi;
-    }
-    
-    // Jika karena suatu alasan array kosong, gunakan angka mentah backend
-    if (calculatedTotalKeseluruhan == 0 && _totalKomisiAllTime > 0) {
-      calculatedTotalKeseluruhan = _totalKomisiAllTime;
-    }
+    // 🔥 PERBAIKAN: Total Keseluruhan = Treatment + Paket
+    double totalKeseluruhan = _komisiTreatmentAllTime + _komisiPaketAllTime;
 
     return Container(
       key: const ValueKey('PayoutCard'),
@@ -479,9 +425,9 @@ class _EarningsScreenState extends State<EarningsScreen> {
         children: [
           Text('Total Komisi Keseluruhan', style: TextStyle(color: Colors.white.withOpacity(0.9), fontSize: 13, fontWeight: FontWeight.w500)),
           const SizedBox(height: 8),
-          Text(formatRupiah(calculatedTotalKeseluruhan), style: const TextStyle(color: Colors.white, fontSize: 32, fontWeight: FontWeight.bold)),
+          Text(formatRupiah(totalKeseluruhan), style: const TextStyle(color: Colors.white, fontSize: 32, fontWeight: FontWeight.bold)),
           const SizedBox(height: 4),
-          Text('Keseluruhan komisi yang Anda dapatkan', style: TextStyle(color: Colors.white.withOpacity(0.8), fontSize: 12, fontWeight: FontWeight.w500)),
+          Text('Total gabungan komisi Treatment & Paket', style: TextStyle(color: Colors.white.withOpacity(0.8), fontSize: 12, fontWeight: FontWeight.w500)),
         ],
       ),
     );
@@ -498,7 +444,7 @@ class _EarningsScreenState extends State<EarningsScreen> {
   }
 
   Widget _buildTabs() {
-    final tabs = ['Treatment', 'Paket', 'Riwayat Payout'];
+    final tabs = ['Treatment', 'Paket', 'Riwayat Penarikan'];
     
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 20),
@@ -547,7 +493,6 @@ class _EarningsScreenState extends State<EarningsScreen> {
   }
 
   Widget _buildTreatmentListView() {
-    // Terapkan Filter Tanggal ke List
     final filteredList = _filterListByDate(_rincianTreatment, 'tgl_dokumen');
 
     if (filteredList.isEmpty) {
@@ -578,7 +523,7 @@ class _EarningsScreenState extends State<EarningsScreen> {
         final pendapatanKotorItem = _parseDouble(item['pendapatan_sebelum_diskon']);
         double komisiItem = _parseDouble(item['komisi']);
 
-        // 🔥 PERBAIKAN: Jika API mengirim komisi 0, hitung otomatis 5% dari harga
+        // Jika API mengirim komisi 0, hitung otomatis 5% dari harga khusus untuk TAMPILAN LIST SAJA.
         if (komisiItem <= 0 && pendapatanKotorItem > 0) {
           komisiItem = pendapatanKotorItem * 0.05;
         }
@@ -654,7 +599,6 @@ class _EarningsScreenState extends State<EarningsScreen> {
   }
 
   Widget _buildPaketListView() {
-    // Terapkan Filter Tanggal ke List Paket
     final filteredList = _filterListByDate(_rincianPaket, 'tgl_transaksi');
 
     if (filteredList.isEmpty) {
@@ -676,7 +620,7 @@ class _EarningsScreenState extends State<EarningsScreen> {
         final hargaPaket = _parseDouble(item['harga_paket']);
         double komisiItem = _parseDouble(item['komisi']);
 
-        // 🔥 PERBAIKAN: Jika API mengirim komisi 0, hitung otomatis 5% dari harga paket
+        // Jika API mengirim komisi 0, hitung otomatis 5% dari harga khusus untuk TAMPILAN LIST SAJA.
         if (komisiItem <= 0 && hargaPaket > 0) {
           komisiItem = hargaPaket * 0.05;
         }
@@ -747,8 +691,6 @@ class _EarningsScreenState extends State<EarningsScreen> {
   }
 
   Widget _buildPayoutListView() {
-    // Bisa difilter juga (opsional), namun untuk Riwayat Payout seringkali dibiarkan semua
-    // Di sini kita biarkan semua saja karena ini halaman payout history
     if (_payoutHistory.isEmpty) {
       return Center(
         child: Column(

@@ -18,11 +18,12 @@ class _ProfileScreenState extends State<ProfileScreen> {
   // --- STATE VARIABLE UNTUK DATA DINAMIS ---
   String _therapistName = "Memuat...";
   String _therapistId = "-";
+  String _gerai = "Memuat..."; // State baru untuk Gerai
   
   // State untuk Rating dan Review
   String _rating = "0.0";
   String _reviewCount = "0";
-  String _avatarUrl = ""; // Menyimpan URL foto profil dari API
+  String _avatarUrl = ""; 
   
   bool _isLoading = true;
 
@@ -34,7 +35,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
   // --- FUNGSI MENGAMBIL DATA DARI API ---
   Future<void> _loadProfileData() async {
-    // Tampilkan loading setiap kali fungsi ini dipanggil (termasuk saat Pull-to-Refresh)
     if (mounted) {
       setState(() {
         _isLoading = true;
@@ -46,28 +46,32 @@ class _ProfileScreenState extends State<ProfileScreen> {
       SharedPreferences prefs = await SharedPreferences.getInstance();
       String name = prefs.getString('nama_lengkap') ?? prefs.getString('fullname') ?? 'Terapis Mom n Jo';
       String id = prefs.getString('username') ?? prefs.getString('id_terapis') ?? 'TRP-000';
+      String branch = prefs.getString('gerai') ?? prefs.getString('branch') ?? '-'; 
       
       if (mounted) {
         setState(() {
-          _therapistName = name.isEmpty ? id : name; // Fallback jika nama kosong di cache
+          _therapistName = name.isEmpty ? id : name; 
           _therapistId = id;
+          _gerai = branch; // Tampilkan gerai dari lokal sementara loading
         });
       }
 
-      // 2. Panggil API getProfile() untuk mengambil rating & info terbaru
+      // 2. Panggil API secara paralel (Profile untuk rating, Data Diri untuk Gerai yang pasti)
       final apiService = ApiService();
-      final response = await apiService.getProfile();
+      final responses = await Future.wait([
+        apiService.getProfile(),
+        apiService.getDataDiri(),
+      ]);
 
-      // CEK TERMINAL: Baris ini akan mencetak isi asli dari backend ke console
-      debugPrint("=== CEK RATING DARI BACKEND ===");
-      debugPrint("Response Profile: $response");
+      final profileResponse = responses[0];
+      final dataDiriResponse = responses[1];
 
       if (mounted) {
-        if (response['success'] == true || response['status'] == 'success') {
-          final data = response['data'];
-          
-          setState(() {
-            // Cek jika nama_lengkap kosong dari API, gunakan username sebagai gantinya
+        setState(() {
+          // --- A. UPDATE DARI PROFILE API (Nama, Avatar, Rating) ---
+          if (profileResponse['success'] == true || profileResponse['status'] == 'success') {
+            final data = profileResponse['data'];
+            
             String fetchedName = data['nama_lengkap']?.toString() ?? '';
             if (fetchedName.trim().isEmpty) {
               fetchedName = data['username']?.toString() ?? _therapistName;
@@ -76,8 +80,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
             _therapistName = fetchedName;
             _therapistId = data['username'] ?? _therapistId;
 
-            // --- PERBAIKAN PARSING RATING & REVIEW ---
-            // Mengatasi kemungkinan backend mengirim String, Int, atau Double
             var rawRating = data['average_rating'];
             if (rawRating != null) {
                double? parsedRating;
@@ -86,7 +88,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
                } else {
                  parsedRating = double.tryParse(rawRating.toString());
                }
-               // Format jadi 1 angka di belakang koma (misal "4.8")
                _rating = parsedRating != null ? parsedRating.toStringAsFixed(1) : '0.0';
             } else {
                _rating = '0.0';
@@ -94,26 +95,51 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
             _reviewCount = data['total_reviews']?.toString() ?? '0';
             
-            // Set foto profil (gunakan avatar_url dari backend atau rakit manual jika ada avatar)
             if (data['avatar_url'] != null) {
               _avatarUrl = data['avatar_url'];
             } else if (data['avatar'] != null && data['avatar'].toString().isNotEmpty) {
-              // Jika backend hanya kirim nama file, gabungkan dengan base url
               _avatarUrl = "https://app.momnjo.com/assets/images/${data['avatar']}";
             }
 
-            _isLoading = false;
-          });
-        } else {
-          setState(() {
-            _isLoading = false;
-          });
-        }
+            // Cek jika API profile punya gerai (fallback awal)
+            String fetchedGeraiProfile = data['gerai']?.toString() ?? data['branch']?.toString() ?? '';
+            if (fetchedGeraiProfile.trim().isNotEmpty && fetchedGeraiProfile != 'null') {
+              _gerai = fetchedGeraiProfile;
+            }
+          }
+
+          // --- B. UPDATE DARI DATA DIRI API (Khusus memastikan Gerai) ---
+          if (dataDiriResponse['success'] == true || dataDiriResponse['status'] == 'success') {
+            dynamic rawDataDiri = dataDiriResponse['data'];
+            Map<String, dynamic> safeDataDiri = {};
+            
+            // Antisipasi jika backend kirim array atau object
+            if (rawDataDiri is List && rawDataDiri.isNotEmpty) {
+              safeDataDiri = rawDataDiri[0];
+            } else if (rawDataDiri is Map) {
+              safeDataDiri = Map<String, dynamic>.from(rawDataDiri);
+            }
+
+            String fetchedGeraiDataDiri = safeDataDiri['gerai']?.toString() ?? safeDataDiri['branch']?.toString() ?? '';
+            
+            if (fetchedGeraiDataDiri.trim().isNotEmpty && fetchedGeraiDataDiri != 'null' && fetchedGeraiDataDiri != '-') {
+              _gerai = fetchedGeraiDataDiri; // Timpa dengan data dari get_data_diri.php
+            }
+          }
+
+          // Bersihkan text jika gerai tetap gagal diload
+          if (_gerai == "Memuat..." || _gerai.trim().isEmpty) {
+            _gerai = "-";
+          }
+
+          _isLoading = false;
+        });
       }
     } catch (e) {
       if (mounted) {
         setState(() {
-          _therapistName = "Terapis Mom n Jo";
+          if (_therapistName == "Memuat...") _therapistName = "Terapis Mom n Jo";
+          if (_gerai == "Memuat...") _gerai = "-";
           _isLoading = false;
         });
       }
@@ -185,25 +211,18 @@ class _ProfileScreenState extends State<ProfileScreen> {
           ),
           centerTitle: true,
         ),
-        // Dibungkus dengan RefreshIndicator agar bisa ditarik untuk update
         body: RefreshIndicator(
           onRefresh: _loadProfileData,
           color: primaryPink,
           child: SingleChildScrollView(
-            // Memastikan halaman selalu bisa ditarik scroll-nya ke bawah meski kontennya sedikit
             physics: const AlwaysScrollableScrollPhysics(),
             child: Column(
               children: [
                 const SizedBox(height: 10),
-                // 1. Header Profil (Sekarang Dinamis)
                 _buildProfileHeader(),
                 const SizedBox(height: 16),
-
-                // 2. Info Detail
                 _buildDetailInfo(),
                 const SizedBox(height: 16),
-
-                // 3. Menu List 
                 _buildMenuList(context),
                 const SizedBox(height: 40), 
               ],
@@ -241,7 +260,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
             ),
             child: CircleAvatar(
               radius: 36,
-              // Jika _avatarUrl ada, pakai itu. Kalau kosong, pakai gambar dummy API (UI Avatars/Pravatar)
               backgroundImage: _avatarUrl.isNotEmpty 
                   ? NetworkImage(_avatarUrl)
                   : const NetworkImage('https://ui-avatars.com/api/?name=Mom+N+Jo&background=E8647C&color=fff'), 
@@ -318,7 +336,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
       ),
       child: Column(
         children: [
-          _buildInfoRow('Gerai', 'Bandung & Cimahi'), 
+          // 🔥 Memanggil variabel _gerai yang dinamis
+          _buildInfoRow('Gerai', _gerai), 
         ],
       ),
     );

@@ -262,7 +262,7 @@ class _RequestPayoutScreenState extends State<RequestPayoutScreen> {
             onPressed: () => Navigator.pop(context),
           ),
           title: Text(
-            'Request Payout',
+            'Permohonan Penarikan',
             style: TextStyle(color: textDarkBrown, fontSize: 20, fontWeight: FontWeight.w900),
           ),
           centerTitle: true,
@@ -283,8 +283,8 @@ class _RequestPayoutScreenState extends State<RequestPayoutScreen> {
                 const SizedBox(height: 20),
                 
                 _buildInputField(
-                  label: 'Amount',
-                  hint: 'Masukkan nominal',
+                  label: 'Jumlah',
+                  hint: 'Masukkan Nominal',
                   controller: _amountController,
                   prefixWidget: Padding(
                     padding: const EdgeInsets.only(left: 16, right: 8, top: 14, bottom: 14),
@@ -298,13 +298,13 @@ class _RequestPayoutScreenState extends State<RequestPayoutScreen> {
                 ),
                 const SizedBox(height: 20),
 
-                Text('Bank Account', style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: textDarkBrown)),
+                Text('Akun Bank', style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: textDarkBrown)),
                 const SizedBox(height: 8),
                 _buildDropdownField(),
                 const SizedBox(height: 20),
 
                 _buildInputField(
-                  label: 'Account Number',
+                  label: 'Nomor',
                   hint: 'Nomor Rekening',
                   controller: _accountNumberController,
                   keyboardType: TextInputType.number,
@@ -312,14 +312,14 @@ class _RequestPayoutScreenState extends State<RequestPayoutScreen> {
                 const SizedBox(height: 20),
 
                 _buildInputField(
-                  label: 'Account Holder Name',
+                  label: 'Nama',
                   hint: 'Nama Pemilik Rekening',
                   controller: _accountNameController,
                 ),
                 const SizedBox(height: 20),
 
                 _buildInputField(
-                  label: 'Notes (Optional)',
+                  label: 'Catatan (Optional)',
                   hint: 'Catatan tambahan',
                   controller: _notesController,
                   maxLines: 3,
@@ -361,7 +361,7 @@ class _RequestPayoutScreenState extends State<RequestPayoutScreen> {
       ),
       child: Column(
         children: [
-          Text('Available Balance', style: TextStyle(color: textDarkBrown.withOpacity(0.8), fontSize: 13, fontWeight: FontWeight.w600)),
+          Text('Saldo yang Tersedia', style: TextStyle(color: textDarkBrown.withOpacity(0.8), fontSize: 13, fontWeight: FontWeight.w600)),
           const SizedBox(height: 8),
           
           // Indikator loading atau nominal asli
@@ -374,7 +374,7 @@ class _RequestPayoutScreenState extends State<RequestPayoutScreen> {
               : Text(_formatRupiah(_availableBalance), style: TextStyle(color: textDarkBrown, fontSize: 32, fontWeight: FontWeight.w900)),
           
           const SizedBox(height: 4),
-          Text('Withdrawable Today', style: TextStyle(color: textDarkBrown.withOpacity(0.7), fontSize: 12, fontWeight: FontWeight.w500)),
+          Text('Dapat Ditarik Hari Ini', style: TextStyle(color: textDarkBrown.withOpacity(0.7), fontSize: 12, fontWeight: FontWeight.w500)),
         ],
       ),
     );
@@ -497,7 +497,7 @@ class _RequestPayoutScreenState extends State<RequestPayoutScreen> {
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Text('Requested Amount:', style: TextStyle(fontSize: 13, color: textDarkBrown.withOpacity(0.8), fontWeight: FontWeight.w600)),
+              Text('Jumlah permintaan:', style: TextStyle(fontSize: 13, color: textDarkBrown.withOpacity(0.8), fontWeight: FontWeight.w600)),
               Text(_displayAmount, style: TextStyle(fontSize: 14, color: textDarkBrown, fontWeight: FontWeight.bold)),
             ],
           ),
@@ -567,7 +567,7 @@ class _RequestPayoutScreenState extends State<RequestPayoutScreen> {
                 child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2),
               )
             : const Text(
-                ' Submit Payout Request ',
+                ' Ajukan Permintaan Permbayaran ',
                 style: TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.bold),
               ),
       ),

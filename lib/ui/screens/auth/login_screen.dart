@@ -52,20 +52,36 @@ class _LoginScreenState extends State<LoginScreen> {
     });
 
     if (response['success'] == true) {
-      // Ambil objek data dari response
-      final data = response['data'] ?? {}; 
-      final nama = data['nama_lengkap'] ?? '';
+      // Ambil objek data dari response secara aman
+      final data = response['data']; 
+      
+      String nama = '';
+      String rating = '0.0';
+      String reviewCount = '0';
 
-      // --- TAMBAHAN: Simpan Rating & Review ke SharedPreferences ---
+      // Pastikan data adalah Map (JSON Object) yang valid
+      if (data != null && data is Map) {
+        nama = data['nama_lengkap']?.toString() ?? data['nama']?.toString() ?? data['name']?.toString() ?? '';
+        rating = data['rating']?.toString() ?? '0.0';
+        reviewCount = data['review_count']?.toString() ?? '0';
+      }
+
+      // Jika nama tetap kosong setelah dicek semua key, PAKSA gunakan input username
+      if (nama.trim().isEmpty) {
+        nama = inputUser;
+      }
+
+      // --- TAMBAHAN: Simpan Data ke SharedPreferences ---
       SharedPreferences prefs = await SharedPreferences.getInstance();
       
-      // Ambil dari response API dan ubah ke String (berjaga-jaga jika backend mengirimkan int/double)
-      // PENTING: Pastikan 'rating' dan 'review_count' adalah key yang benar dari backend Anda
-      String rating = data['rating']?.toString() ?? '0.0';
-      String reviewCount = data['review_count']?.toString() ?? '0';
-
       await prefs.setString('rating', rating);
       await prefs.setString('review_count', reviewCount);
+      
+      // 🔥 Menyimpan nama agar terbaca di halaman Absensi 🔥
+      await prefs.setString('user_name', nama);
+      
+      // Untuk mengecek di terminal/console apakah berhasil menyimpan
+      debugPrint('=== [DEBUG] NAMA DISIMPAN SEBAGAI: $nama ===');
       // -------------------------------------------------------------
 
       ScaffoldMessenger.of(context).showSnackBar(
@@ -126,7 +142,7 @@ class _LoginScreenState extends State<LoginScreen> {
                   const SizedBox(height: 50),
 
                   const Text(
-                    'Welcome Back!',
+                    'Selamat Datang!!!',
                     style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
                   ),
                   const SizedBox(height: 8),

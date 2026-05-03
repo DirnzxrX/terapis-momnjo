@@ -18,7 +18,8 @@ class _ActivityScreenState extends State<ActivityScreen> {
   
   // --- STATE UNTUK FILTER & API ---
   String _selectedFilter = 'Semua';
-  final List<String> _filters = ['Semua', 'Hari Ini', 'Minggu Ini', 'Bulan Ini', 'Dinilai', 'Belum Dinilai'];
+  // 🔥 DIKEMBALIKAN: Tab 'Hari Ini' sudah balik!
+  final List<String> _filters = ['Semua', 'Hari Ini', 'Minggu Ini', 'Bulan Ini'];
   final TextEditingController _searchController = TextEditingController();
 
   List<dynamic> _apiActivities = [];
@@ -88,7 +89,8 @@ class _ActivityScreenState extends State<ActivityScreen> {
       _filteredActivities = _apiActivities.where((activity) {
         bool matchesTab = true;
         
-        final rawDate = activity['date']?.toString() ?? activity['start_time']?.toString();
+        // Prioritaskan baca start_time dari API
+        final rawDate = activity['start_time']?.toString() ?? activity['date']?.toString();
         DateTime? jobDate;
         if (rawDate != null && rawDate.isNotEmpty) {
           try {
@@ -97,24 +99,19 @@ class _ActivityScreenState extends State<ActivityScreen> {
         }
         
         final jobDay = jobDate != null ? DateTime(jobDate.year, jobDate.month, jobDate.day) : null;
-        final hasRating = activity['rating'] != null && activity['rating'].toString().isNotEmpty;
 
+        // 🔥 LOGIKA HARI INI DIKEMBALIKAN
         if (_selectedFilter == 'Hari Ini') {
           matchesTab = jobDay != null && jobDay.isAtSameMomentAs(today);
         } else if (_selectedFilter == 'Minggu Ini') {
           matchesTab = jobDay != null && (jobDay.isAtSameMomentAs(startOfWeek) || jobDay.isAfter(startOfWeek));
         } else if (_selectedFilter == 'Bulan Ini') {
           matchesTab = jobDay != null && (jobDay.isAtSameMomentAs(startOfMonth) || jobDay.isAfter(startOfMonth));
-        } else if (_selectedFilter == 'Dinilai') {
-          matchesTab = hasRating;
-        } else if (_selectedFilter == 'Belum Dinilai') {
-          matchesTab = !hasRating;
         }
 
         final query = _searchController.text.toLowerCase();
         final name = (activity['customer_name'] ?? '').toString().toLowerCase();
         final treatment = (activity['treatment_name'] ?? activity['treatment_summary'] ?? '').toString().toLowerCase();
-        // Nambahin pencarian ID Booking juga biar sakti
         final idBooking = (activity['id_transaksi'] ?? activity['id_booking'] ?? '').toString().toLowerCase();
         
         bool matchesSearch = query.isEmpty || name.contains(query) || treatment.contains(query) || idBooking.contains(query);
@@ -123,19 +120,11 @@ class _ActivityScreenState extends State<ActivityScreen> {
       }).toList();
       
       _filteredActivities.sort((a, b) {
-         String dateA = a['date']?.toString() ?? a['start_time']?.toString() ?? '2000-01-01';
-         String dateB = b['date']?.toString() ?? b['start_time']?.toString() ?? '2000-01-01';
+         String dateA = a['start_time']?.toString() ?? a['date']?.toString() ?? '2000-01-01';
+         String dateB = b['start_time']?.toString() ?? b['date']?.toString() ?? '2000-01-01';
          return dateB.compareTo(dateA);
       });
     });
-  }
-
-  String _formatDate(String? raw) {
-    if (raw == null || raw.isEmpty) return '-';
-    try {
-      DateTime dt = DateTime.parse(raw);
-      return DateFormat('dd MMMM yyyy').format(dt);
-    } catch (e) { return raw; }
   }
 
   @override
@@ -327,24 +316,38 @@ class _ActivityScreenState extends State<ActivityScreen> {
   }
 
   Widget _buildActivityCard(Map<dynamic, dynamic> data) {
-    // AMBIL ID BOOKING / TRANSAKSI
     final String idBooking = data['id_transaksi']?.toString() ?? data['id_booking']?.toString() ?? '-';
-    
-    final String customerName = data['customer_name']?.toString() ?? 'Klien Tanpa Nama';
+    final String customerName = data['customer_name']?.toString() ?? data['nama_customer']?.toString() ?? 'Klien';
     final String treatmentName = data['treatment_name']?.toString() ?? data['treatment_summary']?.toString() ?? 'Treatment';
     
-    final String serviceType = data['service_type']?.toString() ?? data['room_type']?.toString() ?? 'Onsite';
-    final bool isHomeService = serviceType.toLowerCase().contains('home');
+    final String serviceType = data['service_type']?.toString() ?? data['room_type']?.toString() ?? data['type']?.toString() ?? 'Onsite';
+    final bool isHomeService = serviceType.toLowerCase().contains('home') || serviceType.toLowerCase().contains('kunjungan');
     final String typeText = isHomeService ? 'Home Service' : 'Onsite';
 
-    final String dateText = _formatDate(data['date']?.toString() ?? data['start_time']?.toString());
-    final String startTime = data['time']?.toString() ?? '--:--';
-    
-    final String status = data['status']?.toString() ?? 'Completed';
-    final String qty = data['qty']?.toString() ?? '1';
+    // EKSTRAK TANGGAL & WAKTU (Mulai: --:-- menjadi waktu aktual)
+    String dateText = '-';
+    String timeStr = '--:--';
+    String rawDate = data['start_time']?.toString() ?? data['date']?.toString() ?? '';
+    if (rawDate.isNotEmpty) {
+      try {
+        DateTime dt = DateTime.parse(rawDate);
+        dateText = DateFormat('dd MMMM yyyy').format(dt);
+        timeStr = DateFormat('HH:mm').format(dt);
+      } catch (_) {}
+    }
 
-    final String avatarUrl = data['customer_avatar'] ?? data['avatar'] ?? data['foto'] ?? 'https://i.pravatar.cc/150?img=43';
-    final String? rating = data['rating']?.toString();
+    // Ekstrak Qty
+    int qty = 1;
+    if (data['treatments'] != null && data['treatments'] is List && data['treatments'].isNotEmpty) {
+      qty = int.tryParse(data['treatments'][0]['qty']?.toString() ?? '1') ?? 1;
+    } else {
+      qty = int.tryParse(data['qty']?.toString() ?? '1') ?? 1;
+    }
+
+    int avatarIndex = (customerName.length * 3) % 70;
+    final String avatarUrl = data['customer_avatar'] ?? data['avatar'] ?? data['foto'] ?? 'https://i.pravatar.cc/150?img=$avatarIndex';
+
+    final Map<String, dynamic> safeData = Map<String, dynamic>.from(data);
 
     return Container(
       padding: const EdgeInsets.all(16),
@@ -360,7 +363,7 @@ class _ActivityScreenState extends State<ActivityScreen> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               CircleAvatar(
-                radius: 22,
+                radius: 24,
                 backgroundColor: Colors.grey.shade200,
                 backgroundImage: NetworkImage(avatarUrl),
               ),
@@ -369,12 +372,10 @@ class _ActivityScreenState extends State<ActivityScreen> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    // 🔥 INI DIA TAMBAHAN ID BOOKING-NYA TUAN!
                     Text(
                       'ID: $idBooking',
-                      style: TextStyle(fontSize: 11, fontWeight: FontWeight.w800, color: primaryPeach),
+                      style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.grey.shade400),
                     ),
-                    const SizedBox(height: 2),
                     Text(
                       customerName,
                       style: TextStyle(fontSize: 16, fontWeight: FontWeight.w900, color: textDarkBrown),
@@ -384,7 +385,7 @@ class _ActivityScreenState extends State<ActivityScreen> {
                     const SizedBox(height: 2),
                     Text(
                       treatmentName,
-                      style: TextStyle(fontSize: 13, color: textDarkBrown.withOpacity(0.8), fontWeight: FontWeight.w500),
+                      style: TextStyle(fontSize: 12, color: textDarkBrown.withOpacity(0.8), fontWeight: FontWeight.w500),
                       maxLines: 2,
                       overflow: TextOverflow.ellipsis,
                     ),
@@ -392,82 +393,61 @@ class _ActivityScreenState extends State<ActivityScreen> {
                     Container(
                       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                       decoration: BoxDecoration(
-                        color: primaryPeach.withOpacity(0.2),
+                        color: primaryPeach.withOpacity(0.15),
                         borderRadius: BorderRadius.circular(6),
                       ),
                       child: Text(
                         typeText,
-                        style: TextStyle(color: textDarkBrown, fontSize: 10, fontWeight: FontWeight.w800),
+                        style: TextStyle(color: textDarkBrown, fontSize: 10, fontWeight: FontWeight.bold),
                       ),
                     ),
                   ],
                 ),
               ),
-              
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.end,
-                children: [
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                    decoration: BoxDecoration(
-                      color: badgeGreen,
-                      borderRadius: BorderRadius.circular(20),
-                    ),
-                    child: Text(
-                      status.toUpperCase(),
-                      style: TextStyle(color: textGreen, fontSize: 11, fontWeight: FontWeight.bold),
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  if (rating != null && rating.isNotEmpty)
-                    Row(
-                      children: [
-                        const Icon(Icons.star, color: Colors.amber, size: 16),
-                        const SizedBox(width: 4),
-                        Text(
-                          rating,
-                          style: TextStyle(fontWeight: FontWeight.w800, fontSize: 13, color: textDarkBrown),
-                        ),
-                      ],
-                    ),
-                ],
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                decoration: BoxDecoration(
+                  color: badgeGreen,
+                  borderRadius: BorderRadius.circular(20),
+                ),
+                child: Text(
+                  'COMPLETED',
+                  style: TextStyle(color: textGreen, fontSize: 10, fontWeight: FontWeight.bold),
+                ),
               ),
             ],
           ),
           
           const SizedBox(height: 16),
-          Divider(color: Colors.grey.shade200, height: 1),
-          const SizedBox(height: 16),
-          
           Text(
             dateText,
-            style: TextStyle(fontSize: 13, color: textDarkBrown.withOpacity(0.8), fontWeight: FontWeight.w600),
+            style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: textDarkBrown),
           ),
           const SizedBox(height: 8),
+          
           Row(
             children: [
-              Icon(Icons.schedule, size: 14, color: textDarkBrown.withOpacity(0.6)),
-              const SizedBox(width: 6),
+              Icon(Icons.access_time, size: 14, color: Colors.grey.shade600),
+              const SizedBox(width: 4),
               Text(
-                'Mulai: $startTime',
-                style: TextStyle(fontSize: 12, color: textDarkBrown.withOpacity(0.8), fontWeight: FontWeight.w600),
+                'Mulai: $timeStr',
+                style: TextStyle(fontSize: 12, color: Colors.grey.shade600, fontWeight: FontWeight.w500),
               ),
               const SizedBox(width: 16),
-              Icon(Icons.shopping_bag_outlined, size: 14, color: textDarkBrown.withOpacity(0.6)),
-              const SizedBox(width: 6),
+              Icon(Icons.shopping_bag_outlined, size: 14, color: Colors.grey.shade600),
+              const SizedBox(width: 4),
               Text(
                 'Qty: $qty',
-                style: TextStyle(fontSize: 12, color: textDarkBrown.withOpacity(0.8), fontWeight: FontWeight.w600),
+                style: TextStyle(fontSize: 12, color: Colors.grey.shade600, fontWeight: FontWeight.w500),
               ),
             ],
           ),
           
-          const SizedBox(height: 16),
+          const SizedBox(height: 12),
           Divider(color: Colors.grey.shade200, height: 1),
           
           InkWell(
             onTap: () {
-              final Map<String, dynamic> safeData = Map<String, dynamic>.from(data);
               Navigator.pushNamed(context, '/activity_detail', arguments: safeData);
             },
             child: Padding(

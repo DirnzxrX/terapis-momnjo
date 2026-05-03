@@ -46,7 +46,7 @@ class _ActiveJobScreenState extends State<ActiveJobScreen> {
         // 2. Jika kosong, buat treatment manual dari summary atau name
         if (_treatments.isEmpty) {
           String fallbackName = args['treatment_summary'] ?? args['treatment_name'] ?? _productName;
-          if (fallbackName.isNotEmpty && fallbackName != 'Treatment') {
+          if (fallbackName.isNotEmpty && fallbackName.toLowerCase() != 'treatment' && fallbackName.toLowerCase() != 'layanan') {
             // Bersihkan string dari "(1x)" jika ada
             fallbackName = fallbackName.replaceAll(RegExp(r'\(\d+x\)'), '').trim();
             _treatments = [{'name': fallbackName, 'qty': 1, 'durasi': 60, 'is_done': false}];
@@ -102,22 +102,38 @@ class _ActiveJobScreenState extends State<ActiveJobScreen> {
     }
   }
 
-  // --- HELPER UNTUK MENGEKSTRAK NAMA LAYANAN DENGAN SANGAT AMAN ---
-  String _getTreatmentName(dynamic item) {
+  // 🔥 FUNGSI PENYARING CERDAS (Mencegah Backend Mengirim Placeholder 'Layanan')
+  String _getRobustTreatmentName(dynamic item) {
+    String name = '';
     if (item is Map) {
-      // Cek SEMUA kemungkinan key nama dari backend (name, product_name, dll)
       for (String key in ['name', 'product_name', 'treatment_name', 'nama_layanan', 'layanan', 'deskripsi', 'judul']) {
         if (item[key] != null && item[key].toString().trim().isNotEmpty) {
-          return item[key].toString().trim();
+          name = item[key].toString().trim();
+          break;
         }
       }
+    } else {
+      name = item.toString().trim();
     }
-    String fallback = item.toString().trim();
-    // Jika bentuknya mentah Map, kembalikan kosong agar di-fallback oleh fungsi pemanggil
-    if (fallback == 'Map<String, dynamic>' || fallback.isEmpty || fallback.startsWith('{')) {
-      return ''; 
+
+    // Jika API Backend mengirimkan data sampah/placeholder, KITA PAKSA AMBIL DARI SUMMARY!
+    if (name.isEmpty || name.toLowerCase() == 'layanan' || name.toLowerCase() == 'treatment' || name == 'Map<String, dynamic>' || name.startsWith('{')) {
+      name = _bookingData?['treatment_summary']?.toString() ?? '';
     }
-    return fallback;
+    
+    if (name.isEmpty || name.toLowerCase() == 'layanan' || name.toLowerCase() == 'treatment') {
+      name = _bookingData?['treatment_name']?.toString() ?? '';
+    }
+
+    if (name.isEmpty || name.toLowerCase() == 'layanan' || name.toLowerCase() == 'treatment') {
+      name = _productName;
+    }
+
+    // Bersihkan suffix pengganggu agar cocok dengan database (misal: "Deep Tissue Massage (1x)" -> "Deep Tissue Massage")
+    name = name.replaceAll(RegExp(r'\(\d+x\)'), '').trim();
+    
+    if (name.isEmpty) return 'Treatment'; // Fallback paling akhir
+    return name;
   }
 
   int _extractDurationFromProductName(String name) {
@@ -154,24 +170,13 @@ class _ActiveJobScreenState extends State<ActiveJobScreen> {
       
       final api = ApiService();
       
-      // Dapatkan nama treatment
+      // Ambil nama yang sudah disaring bersih
       String startProductName = '';
       if (_treatments.isNotEmpty) {
-        startProductName = _getTreatmentName(_treatments[0]);
+        startProductName = _getRobustTreatmentName(_treatments[0]);
+      } else {
+        startProductName = _getRobustTreatmentName(''); 
       }
-          
-      // 🔥 FALLBACK SUPER AMAN: Jika masih kosong, ambil dari treatment_summary
-      if (startProductName.isEmpty || startProductName == 'Layanan') {
-        startProductName = _bookingData?['treatment_summary']?.toString() ?? '';
-        startProductName = startProductName.replaceAll(RegExp(r'\(\d+x\)'), '').trim();
-      }
-      
-      if (startProductName.isEmpty) {
-        startProductName = _productName;
-      }
-
-      // Pastikan kalau masih buntu, fallback ke 'Treatment' untuk mencegah error format
-      if (startProductName.isEmpty) startProductName = 'Treatment';
 
       final result = await api.updateJobStatus(
         idTransaksi: _idTransaksi,
@@ -270,12 +275,8 @@ class _ActiveJobScreenState extends State<ActiveJobScreen> {
 
                         if (alreadyDoneFromBackend) continue; 
 
-                        // Ekstrak nama aman
-                        String currentProductName = _getTreatmentName(item);
-                        if (currentProductName.isEmpty || currentProductName == 'Layanan') {
-                          currentProductName = _bookingData?['treatment_summary']?.toString() ?? '';
-                          currentProductName = currentProductName.replaceAll(RegExp(r'\(\d+x\)'), '').trim();
-                        }
+                        // Ekstrak nama aman dari filter cerdas
+                        String currentProductName = _getRobustTreatmentName(item);
                         
                         if (currentProductName.isNotEmpty) {
                           final result = await api.updateJobStatus(
@@ -539,13 +540,7 @@ class _ActiveJobScreenState extends State<ActiveJobScreen> {
   }
 
   Widget _buildTreatmentCard(int index, dynamic item, {required bool isDone}) {
-    String name = _getTreatmentName(item); 
-    
-    // UI Fallback jika benar-benar gagal mengekstrak nama 
-    if (name.isEmpty || name == 'Layanan') {
-      name = _bookingData?['treatment_summary']?.toString() ?? 'Treatment';
-      name = name.replaceAll(RegExp(r'\(\d+x\)'), '').trim();
-    }
+    String name = _getRobustTreatmentName(item); 
     
     String qty = item is Map ? (item['qty']?.toString() ?? '1') : '1';
     int durasiMenit = item is Map ? (int.tryParse(item['durasi']?.toString() ?? '60') ?? 60) : 60;

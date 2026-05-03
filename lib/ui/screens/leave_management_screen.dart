@@ -26,28 +26,8 @@ class _LeaveManagementScreenState extends State<LeaveManagementScreen> {
   DateTime? _filterStartDate;
   DateTime? _filterEndDate;
 
-  List<Map<String, dynamic>> _attendanceHistory = [
-    {
-      'type': 'Daily Record', 'date': '16 Apr 2026', 
-      'in': '08:02 WIB', 'out': '17:05 WIB', 
-      'status': 'Present', 'reason': null,
-    },
-    {
-      'type': 'Daily Record', 'date': '15 Apr 2026', 
-      'in': '08:30 WIB', 'out': '17:00 WIB', 
-      'status': 'Late: 30m', 'reason': null,
-    },
-    {
-      'type': '14 Apr Record', 'date': '14 Apr 2026', 
-      'in': '07:58 WIB', 'out': '17:00 WIB', 
-      'status': 'Present', 'reason': null,
-    },
-    {
-      'type': '13 Apr Record', 'date': '13 Apr 2026', 
-      'in': '--', 'out': '--', 
-      'status': 'Absent', 'reason': 'Sick leave',
-    },
-  ];
+  // Data dummy telah dihapus, list diinisialisasi kosong
+  List<Map<String, dynamic>> _attendanceHistory = [];
 
   @override
   void initState() {
@@ -130,14 +110,14 @@ class _LeaveManagementScreenState extends State<LeaveManagementScreen> {
 
       if (_isOnDuty) {
         _attendanceHistory.insert(0, {
-          'type': 'Daily Record',
+          'type': 'Catatan Harian',
           'date': currentDate,
           'in': currentTime,
           'out': '--', 
-          'status': 'Present',
+          'status': 'Hadir',
           'reason': null,
         });
-        _showInfoMessage('Berhasil Clock In (On Duty) pada $currentTime');
+        _showInfoMessage('Berhasil Absen Masuk (On Duty) pada $currentTime');
       } else {
         for (var record in _attendanceHistory) {
           if (record['out'] == '--') {
@@ -145,7 +125,7 @@ class _LeaveManagementScreenState extends State<LeaveManagementScreen> {
             break; 
           }
         }
-        _showInfoMessage('Berhasil Clock Out (Off Duty) pada $currentTime');
+        _showInfoMessage('Berhasil Absen Keluar (Off Duty) pada $currentTime');
       }
     });
 
@@ -332,7 +312,8 @@ class _LeaveManagementScreenState extends State<LeaveManagementScreen> {
                         ),
                         Center(
                           child: Text(
-                            _isOnDuty ? 'Geser ke Off Duty' : 'Geser ke On Duty',
+                            // Diterjemahkan agar lebih jelas
+                            _isOnDuty ? 'Geser untuk Absen Keluar' : 'Geser untuk Absen Masuk',
                             style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: 14),
                           ),
                         ),
@@ -372,7 +353,7 @@ class _LeaveManagementScreenState extends State<LeaveManagementScreen> {
             Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text('Filter by Date', style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: textDarkBrown)),
+                Text('Filter Berdasarkan Tanggal', style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: textDarkBrown)),
                 Text('Pilih Rentang Tanggal', style: TextStyle(fontSize: 12, color: Colors.grey.shade600, fontWeight: FontWeight.w500)),
               ],
             ),
@@ -419,10 +400,11 @@ class _LeaveManagementScreenState extends State<LeaveManagementScreen> {
     Color badgeBgColor;
     Color badgeTextColor;
     
-    if (data['status'] == 'Present') {
+    // Pengecekan disesuaikan dengan bahasa Indonesia
+    if (data['status'] == 'Hadir') {
       badgeBgColor = Colors.green.shade100;
       badgeTextColor = Colors.green.shade800;
-    } else if (data['status'].toString().contains('Late')) {
+    } else if (data['status'].toString().contains('Terlambat')) {
       badgeBgColor = Colors.orange.shade100;
       badgeTextColor = Colors.orange.shade900;
     } else {
@@ -465,7 +447,7 @@ class _LeaveManagementScreenState extends State<LeaveManagementScreen> {
               padding: const EdgeInsets.only(right: 16, bottom: 8),
               child: Align(
                 alignment: Alignment.centerRight,
-                child: Text('Reason: ${data['reason']}', style: TextStyle(fontSize: 12, fontStyle: FontStyle.italic, color: Colors.red.shade800)),
+                child: Text('Alasan: ${data['reason']}', style: TextStyle(fontSize: 12, fontStyle: FontStyle.italic, color: Colors.red.shade800)),
               ),
             ),
           Container(
