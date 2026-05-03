@@ -38,12 +38,19 @@ class _ActiveJobScreenState extends State<ActiveJobScreen> {
         _bookingData = args;
         
         _idTransaksi = args['id_transaksi']?.toString() ?? '';
-        _productName = args['product_name']?.toString() ?? 'Treatment';
+        _productName = args['product_name']?.toString() ?? '';
         
-        _treatments = args['treatments'] ?? [];
+        // 1. Ambil array treatments
+        _treatments = args['treatments'] ?? args['services'] ?? [];
 
-        if (_treatments.isEmpty && _productName.isNotEmpty && _productName != 'Treatment') {
-          _treatments = [_productName];
+        // 2. Jika kosong, buat treatment manual dari summary atau name
+        if (_treatments.isEmpty) {
+          String fallbackName = args['treatment_summary'] ?? args['treatment_name'] ?? _productName;
+          if (fallbackName.isNotEmpty && fallbackName != 'Treatment') {
+            // Bersihkan string dari "(1x)" jika ada
+            fallbackName = fallbackName.replaceAll(RegExp(r'\(\d+x\)'), '').trim();
+            _treatments = [{'name': fallbackName, 'qty': 1, 'durasi': 60, 'is_done': false}];
+          }
         }
 
         // --- LOGIKA AKUMULASI WAKTU ---
@@ -62,7 +69,7 @@ class _ActiveJobScreenState extends State<ActiveJobScreen> {
           }
           _estimatedTotalSeconds = totalMenit * 60; 
         } else {
-          _estimatedTotalSeconds = _extractDurationFromProductName(_productName);
+          _estimatedTotalSeconds = _extractDurationFromProductName(_productName.isNotEmpty ? _productName : '60 min');
         }
 
         if (args.containsKey('savedState') && args['savedState'] != null) {
@@ -83,13 +90,34 @@ class _ActiveJobScreenState extends State<ActiveJobScreen> {
         } else {
           _treatmentsDone = List.generate(_treatments.length, (index) {
             final item = _treatments[index];
-            if (item is Map && item['is_done'] == true) return true;
+            if (item is Map) {
+              var doneVal = item['is_done'];
+              if (doneVal == true || doneVal == 'true' || doneVal == 1 || doneVal == '1') return true;
+            }
             return false;
           });
         }
       }
       _isDataLoaded = true;
     }
+  }
+
+  // --- HELPER UNTUK MENGEKSTRAK NAMA LAYANAN DENGAN SANGAT AMAN ---
+  String _getTreatmentName(dynamic item) {
+    if (item is Map) {
+      // Cek SEMUA kemungkinan key nama dari backend (name, product_name, dll)
+      for (String key in ['name', 'product_name', 'treatment_name', 'nama_layanan', 'layanan', 'deskripsi', 'judul']) {
+        if (item[key] != null && item[key].toString().trim().isNotEmpty) {
+          return item[key].toString().trim();
+        }
+      }
+    }
+    String fallback = item.toString().trim();
+    // Jika bentuknya mentah Map, kembalikan kosong agar di-fallback oleh fungsi pemanggil
+    if (fallback == 'Map<String, dynamic>' || fallback.isEmpty || fallback.startsWith('{')) {
+      return ''; 
+    }
+    return fallback;
   }
 
   int _extractDurationFromProductName(String name) {
@@ -100,7 +128,7 @@ class _ActiveJobScreenState extends State<ActiveJobScreen> {
       int minutes = int.tryParse(match.group(1) ?? '60') ?? 60;
       return minutes * 60; 
     }
-    return 60 * 60; 
+    return 60 * 60; // Default 1 jam
   }
 
   @override
@@ -125,9 +153,25 @@ class _ActiveJobScreenState extends State<ActiveJobScreen> {
       setState(() => _isApiLoading = true);
       
       final api = ApiService();
-      String startProductName = _treatments.isNotEmpty 
-          ? (_treatments[0] is Map ? (_treatments[0]['name'] ?? _productName) : _treatments[0].toString()) 
-          : _productName;
+      
+      // Dapatkan nama treatment
+      String startProductName = '';
+      if (_treatments.isNotEmpty) {
+        startProductName = _getTreatmentName(_treatments[0]);
+      }
+          
+      // 🔥 FALLBACK SUPER AMAN: Jika masih kosong, ambil dari treatment_summary
+      if (startProductName.isEmpty || startProductName == 'Layanan') {
+        startProductName = _bookingData?['treatment_summary']?.toString() ?? '';
+        startProductName = startProductName.replaceAll(RegExp(r'\(\d+x\)'), '').trim();
+      }
+      
+      if (startProductName.isEmpty) {
+        startProductName = _productName;
+      }
+
+      // Pastikan kalau masih buntu, fallback ke 'Treatment' untuk mencegah error format
+      if (startProductName.isEmpty) startProductName = 'Treatment';
 
       final result = await api.updateJobStatus(
         idTransaksi: _idTransaksi,
@@ -218,12 +262,20 @@ class _ActiveJobScreenState extends State<ActiveJobScreen> {
                       if (_treatmentsDone[i]) {
                         var item = _treatments[i];
                         
-                        bool alreadyDoneFromBackend = item is Map && item['is_done'] == true;
-                        if (alreadyDoneFromBackend) {
-                          continue; 
+                        bool alreadyDoneFromBackend = false;
+                        if (item is Map) {
+                           var dVal = item['is_done'];
+                           alreadyDoneFromBackend = (dVal == true || dVal == 'true' || dVal == 1 || dVal == '1');
                         }
 
-                        String currentProductName = item is Map ? (item['name'] ?? '') : item.toString();
+                        if (alreadyDoneFromBackend) continue; 
+
+                        // Ekstrak nama aman
+                        String currentProductName = _getTreatmentName(item);
+                        if (currentProductName.isEmpty || currentProductName == 'Layanan') {
+                          currentProductName = _bookingData?['treatment_summary']?.toString() ?? '';
+                          currentProductName = currentProductName.replaceAll(RegExp(r'\(\d+x\)'), '').trim();
+                        }
                         
                         if (currentProductName.isNotEmpty) {
                           final result = await api.updateJobStatus(
@@ -244,15 +296,13 @@ class _ActiveJobScreenState extends State<ActiveJobScreen> {
                       }
                     }
 
-                    // 🔥 2. --- PERBAIKAN FATAL: TEMBAK API BOOKING COMPLETED ---
-                    // Ini yang biasanya memicu backend PHP untuk menyuntikkan komisi ke database Earning
+                    // 2. --- TEMBAK API BOOKING COMPLETED ---
                     if (isAllSuccess) {
                       String idBooking = _bookingData?['id_booking']?.toString() ?? '';
                       if (idBooking.isNotEmpty) {
-                        // Mengubah status booking utama menjadi 'completed' (atau sesuaikan dengan kata kunci backend, misal 'selesai')
                         final finalResult = await api.updateBookingStatus(
                           idBooking: idBooking, 
-                          newStatus: 'completed' 
+                          newStatus: 'Closed' 
                         );
 
                         if (finalResult['success'] != true) {
@@ -278,7 +328,7 @@ class _ActiveJobScreenState extends State<ActiveJobScreen> {
                         'action': 'finish_treatment',
                         'durasi_aktual': _secondsElapsed,
                         'stepsDone': _treatmentsDone,
-                        'is_fully_completed': true // Parameter tambahan
+                        'is_fully_completed': true 
                       });
                     } else {
                       Navigator.pop(context); // Tutup dialog
@@ -489,7 +539,14 @@ class _ActiveJobScreenState extends State<ActiveJobScreen> {
   }
 
   Widget _buildTreatmentCard(int index, dynamic item, {required bool isDone}) {
-    String name = item is Map ? (item['name'] ?? 'Layanan') : item.toString();
+    String name = _getTreatmentName(item); 
+    
+    // UI Fallback jika benar-benar gagal mengekstrak nama 
+    if (name.isEmpty || name == 'Layanan') {
+      name = _bookingData?['treatment_summary']?.toString() ?? 'Treatment';
+      name = name.replaceAll(RegExp(r'\(\d+x\)'), '').trim();
+    }
+    
     String qty = item is Map ? (item['qty']?.toString() ?? '1') : '1';
     int durasiMenit = item is Map ? (int.tryParse(item['durasi']?.toString() ?? '60') ?? 60) : 60;
 

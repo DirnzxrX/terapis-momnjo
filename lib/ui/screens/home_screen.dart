@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart'; 
 import 'package:shared_preferences/shared_preferences.dart';
@@ -22,7 +23,7 @@ class _HomeScreenState extends State<HomeScreen> {
   // STATE STATUS KERJA
   bool _isOnDuty = false; 
 
-  // STATE NOTIFIKASI
+  // STATE NOTIFIKAASI
   bool _hasNewNotification = false;
   List<Map<String, String>> _notifications = [];
 
@@ -40,7 +41,7 @@ class _HomeScreenState extends State<HomeScreen> {
     try {
       final prefs = await SharedPreferences.getInstance();
       
-      // PERBAIKAN 1: Tambahkan fallback ke 'fullname' dan 'username' dari cache lokal
+      // Mengambil data dari cache lokal
       String? namaSimpanan = prefs.getString('nama_lengkap') ?? prefs.getString('fullname');
       String? usernameSimpanan = prefs.getString('username');
       String? fotoSimpanan = prefs.getString('foto'); 
@@ -51,7 +52,7 @@ class _HomeScreenState extends State<HomeScreen> {
       if (namaSimpanan != null && namaSimpanan.trim().isNotEmpty) {
         namaTampil = namaSimpanan;
       } else if (usernameSimpanan != null && usernameSimpanan.trim().isNotEmpty) {
-        namaTampil = usernameSimpanan; // Gunakan username jika nama_lengkap kosong
+        namaTampil = usernameSimpanan; 
       }
       
       final api = ApiService();
@@ -61,7 +62,7 @@ class _HomeScreenState extends State<HomeScreen> {
       int todayJobsCount = 0;
       int todayHistoryCount = 0;
 
-      // 1. FETCH JOBS (Tugas Aktif) - Gunakan getActiveJobs agar sinkron dengan Schedule Screen
+      // 1. FETCH JOBS (Tugas Aktif)
       final jobsResponse = await api.getActiveJobs(); 
       Map<String, dynamic>? nextBook;
       List<Map<String, String>> newNotifs = [];
@@ -75,7 +76,7 @@ class _HomeScreenState extends State<HomeScreen> {
           final String status = (job['status'] ?? job['booking_status'] ?? '').toString().toLowerCase().trim();
           final String startTime = job['start_time']?.toString() ?? '';
           
-          // Hitung booking hari ini (berdasarkan waktu mulai yang mengandung tanggal hari ini)
+          // Hitung booking hari ini (tugas yang masih aktif)
           if (startTime.startsWith(todayStr)) {
             todayJobsCount++;
           }
@@ -89,7 +90,6 @@ class _HomeScreenState extends State<HomeScreen> {
           openJobs.sort((a, b) {
             DateTime timeA = DateTime.tryParse(a['start_time']?.toString() ?? '') ?? DateTime(2000);
             DateTime timeB = DateTime.tryParse(b['start_time']?.toString() ?? '') ?? DateTime(2000);
-            // Ubah jadi Ascending agar tugas yang paling dekat waktunya muncul duluan
             return timeA.compareTo(timeB); 
           });
 
@@ -114,29 +114,26 @@ class _HomeScreenState extends State<HomeScreen> {
       if (historyResponse['status'] == 'success' || historyResponse['success'] == true) {
          List historyList = historyResponse['data'] ?? [];
          for(var item in historyList) {
-            // Cek berbagai kemungkinan nama field tanggal dari backend
-            String tgl = item['tgl_dokumen'] ?? item['tgl_transaksi'] ?? item['date'] ?? '';
-            // Jika tanggal history sama dengan hari ini, tambahkan ke counter Selesai
+            String tgl = item['start_time'] ?? item['jadwal'] ?? item['date'] ?? '';
+            // Hitung tugas yang sudah selesai hari ini
             if (tgl.startsWith(todayStr)) {
                todayHistoryCount++;
             }
          }
       }
 
-      // PERBAIKAN 2: FETCH PROFILE (Agar nama & foto di Home sinkron dengan Profile Screen)
+      // 3. FETCH PROFILE
       try {
         final profileResponse = await api.getProfile();
         if (profileResponse['success'] == true || profileResponse['status'] == 'success') {
           final data = profileResponse['data'];
           
-          // Cek nama lengkap, jika kosong gunakan username
           String fetchedName = data['nama_lengkap']?.toString() ?? '';
           if (fetchedName.trim().isEmpty) {
             fetchedName = data['username']?.toString() ?? namaTampil;
           }
           namaTampil = fetchedName;
           
-          // Ambil URL Foto
           if (data['avatar_url'] != null) {
             fotoSimpanan = data['avatar_url'];
           } else if (data['avatar'] != null && data['avatar'].toString().isNotEmpty) {
@@ -152,15 +149,19 @@ class _HomeScreenState extends State<HomeScreen> {
           _namaTerapis = namaTampil;
           _fotoProfile = fotoSimpanan ?? '';
           _isOnDuty = isOnDutySimpanan; 
-          _bookingHariIni = todayJobsCount;
-          _selesai = todayHistoryCount;
-          _nextBooking = nextBook;
           
+          // 🔥 PERBAIKAN LOGIKA: 
+          // Total Booking = (Aktif Hari Ini) + (Selesai Hari Ini)
+          _bookingHariIni = todayJobsCount + todayHistoryCount;
+          _selesai = todayHistoryCount; 
+          
+          _nextBooking = nextBook;
           _notifications = newNotifs;
           _hasNewNotification = hasNewNotif;
-          
           _isLoading = false;
         });
+        
+        debugPrint("📊 [STATISTIK HARI INI] Active: $todayJobsCount | Selesai: $todayHistoryCount | Total: $_bookingHariIni");
       }
     } catch (e) {
       debugPrint("Error load data: $e");
@@ -174,12 +175,8 @@ class _HomeScreenState extends State<HomeScreen> {
       _isOnDuty = value;
     });
     
-    // Simpan ke memori lokal
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool('is_on_duty', value);
-
-    // TODO: Jika nanti ada API untuk kirim status absensi ke Backend PHP, panggil di sini
-    // contoh: await ApiService().updateStatusAbsensi(value ? 'on' : 'off');
   }
 
   String _formatTime(String? rawTime) {
@@ -408,7 +405,6 @@ class _HomeScreenState extends State<HomeScreen> {
         CircleAvatar(
           radius: 28,
           backgroundColor: Colors.grey.shade200,
-          // PERBAIKAN 3: Fallback gambar jika error 'default_profile.png'
           backgroundImage: _fotoProfile.isNotEmpty && _fotoProfile.startsWith('http')
               ? NetworkImage(_fotoProfile)
               : const NetworkImage('https://ui-avatars.com/api/?name=Mom+N+Jo&background=ECA898&color=fff'), 
@@ -504,7 +500,7 @@ class _HomeScreenState extends State<HomeScreen> {
             ),
           ),
           
-          // KANAN: Tombol Absensi & Chat Admin (Tetap Dipertahankan)
+          // KANAN: Tombol Absensi & Chat Admin
           Row(
             children: [
               GestureDetector(

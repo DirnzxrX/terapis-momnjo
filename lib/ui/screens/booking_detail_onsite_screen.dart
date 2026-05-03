@@ -175,7 +175,7 @@ class _DetailBookingOnsiteScreenState extends State<DetailBookingOnsiteScreen> {
               ),
             ),
           ),
-          _buildBottomButton(),
+          _buildBottomButton(layananList),
         ],
       ),
     );
@@ -404,7 +404,7 @@ class _DetailBookingOnsiteScreenState extends State<DetailBookingOnsiteScreen> {
     );
   }
 
-  Widget _buildBottomButton() {
+  Widget _buildBottomButton(List<dynamic> layananList) {
     final s = _currentStatus.toLowerCase();
     String text = 'PANGGIL KLIEN (PEMERIKSAAN)';
     if (s == 'accepted' || s == 'new' || s == 'open') text = 'PANGGIL KLIEN (PEMERIKSAAN)'; 
@@ -441,7 +441,34 @@ class _DetailBookingOnsiteScreenState extends State<DetailBookingOnsiteScreen> {
               await _openActiveJob();
             } 
             else if (s == 'completed' || s == 'closed') {
-              Navigator.pushReplacementNamed(context, '/visit_report', arguments: _data);
+              setState(() { _isUpdatingStatus = true; }); 
+              
+              final api = ApiService();
+              final String idTransaksi = _data?['id_transaksi']?.toString() ?? '';
+
+              // PASTIKAN SEMUA TREATMENT DI-FINISH (Sapu bersih jika status telanjur Closed tapi is_done masih false)
+              for (var item in layananList) {
+                bool alreadyDone = item is Map && item['is_done'] == true;
+                if (!alreadyDone) {
+                  String pName = '';
+                  if (item is Map) {
+                    pName = (item['product_name'] ?? item['name'] ?? '').toString().trim();
+                  } else {
+                    pName = item.toString().trim();
+                  }
+
+                  if (pName.isNotEmpty && idTransaksi.isNotEmpty) {
+                    await api.updateJobStatus(
+                      idTransaksi: idTransaksi,
+                      action: 'finish',
+                      productName: pName,
+                    );
+                  }
+                }
+              }
+              
+              setState(() { _isUpdatingStatus = false; });
+              if (mounted) Navigator.pushReplacementNamed(context, '/visit_report', arguments: _data);
             } 
           },
           style: ElevatedButton.styleFrom(

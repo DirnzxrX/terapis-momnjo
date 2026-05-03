@@ -33,7 +33,7 @@ class ApiService {
   }
 
   // =========================================================================
-  // 1. FUNGSI UTAMA GET JOBS (Active Jobs)
+  // 1. FUNGSI UTAMA GET JOBS (All, Active, & History)
   // =========================================================================
   Future<Map<String, dynamic>> getJobs({String? status, String? search}) async {
     final String? token = await _getToken();
@@ -81,7 +81,52 @@ class ApiService {
   }
 
   Future<Map<String, dynamic>> getActiveJobs({String? search}) async {
-    return await getJobs(search: search); 
+    return await getJobs(status: 'open', search: search); 
+  }
+
+  // =========================================================================
+  // 🔥 2. GET JOB DETAIL (TERBARU DARI BACKEND)
+  // =========================================================================
+  Future<Map<String, dynamic>> getJobDetail(String idTransaksi) async {
+    final String? token = await _getToken();
+    if (token == null) return {'success': false, 'message': 'Token tidak ditemukan'};
+
+    if (idTransaksi.trim().isEmpty) {
+      return {'success': false, 'message': 'ID Transaksi wajib diisi.'};
+    }
+
+    final String url = '$baseUrl/api_terapis/get_job_detail.php?id_transaksi=$idTransaksi';
+
+    try {
+      final response = await http.get(
+        Uri.parse(url),
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json',
+          'Authorization': 'Bearer $token',
+        },
+      );
+
+      _logDebug(url: url, method: "GET", statusCode: response.statusCode, responseBody: response.body);
+
+      if (response.statusCode == 200) {
+        return json.decode(response.body);
+      } else if (response.statusCode == 400) {
+        return {'success': false, 'message': 'ID Transaksi tidak valid atau tidak lengkap.'};
+      } else if (response.statusCode == 401) {
+        await logout();
+        return {'success': false, 'message': 'Sesi habis, silakan login lagi.'};
+      }
+      
+      try {
+        final errorData = json.decode(response.body);
+        return {'success': false, 'message': errorData['message'] ?? 'Gagal mengambil detail pekerjaan.'};
+      } catch (_) {
+        return {'success': false, 'message': 'Gagal mengambil detail pekerjaan (Status: ${response.statusCode})'};
+      }
+    } catch (e) {
+      return {'success': false, 'message': 'Kesalahan jaringan: $e'};
+    }
   }
 
   // =========================================================================
@@ -101,7 +146,6 @@ class ApiService {
     try {
       http.Response response;
 
-      // Skenario 1: Tiba di Lokasi (Multipart form-data untuk upload foto)
       if (action == 'arrived') {
         var request = http.MultipartRequest('POST', Uri.parse(url));
         request.headers['Authorization'] = 'Bearer $token';
@@ -119,7 +163,6 @@ class ApiService {
         var streamedResponse = await request.send();
         response = await http.Response.fromStream(streamedResponse);
       } 
-      // Skenario 2 & 3: Mulai & Selesai (application/json)
       else {
         final Map<String, dynamic> body = {
           'id_transaksi': idTransaksi,
@@ -145,7 +188,6 @@ class ApiService {
       if (response.statusCode == 200 || response.statusCode == 400 || response.statusCode == 401 || response.statusCode == 404) {
         try {
           final data = json.decode(response.body);
-          // Menyelaraskan status 'success'/'error' dari server backend menjadi boolean 'success' Flutter
           if (data['status'] == 'success') {
             data['success'] = true;
           } else {
@@ -166,7 +208,7 @@ class ApiService {
   }
 
   // =========================================================================
-  // 2. MENGAMBIL STATISTIK TERAPIS (HOME SCREEN)
+  // MENGAMBIL STATISTIK TERAPIS (HOME SCREEN)
   // =========================================================================
   Future<Map<String, dynamic>> getStats() async {
     final String? token = await _getToken();
@@ -200,7 +242,7 @@ class ApiService {
   }
 
   // =========================================================================
-  // 🔥 3. UPDATE STATUS BOOKING KESELURUHAN (MENDUKUNG UPLOAD FOTO)
+  // UPDATE STATUS BOOKING KESELURUHAN (MENDUKUNG UPLOAD FOTO)
   // =========================================================================
   Future<Map<String, dynamic>> updateBookingStatus({
     required String idBooking,
@@ -267,7 +309,7 @@ class ApiService {
   }
 
   // =========================================================================
-  // 4. MENYIMPAN DATA MEDIS (Pemeriksaan Klien)
+  // MENYIMPAN DATA MEDIS (Pemeriksaan Klien)
   // =========================================================================
   Future<Map<String, dynamic>> storeDataMedis({
     required String idTransaksi,
@@ -334,46 +376,14 @@ class ApiService {
   }
 
   // =========================================================================
-  // 5. MENGAMBIL LIST RIWAYAT PEKERJAAN (HISTORY)
+  // MENGAMBIL LIST RIWAYAT PEKERJAAN (HISTORY)
   // =========================================================================
-  Future<Map<String, dynamic>> getHistoryList() async {
-    final String? token = await _getToken();
-    if (token == null) return {'success': false, 'message': 'Token tidak ditemukan'};
-
-    final String url = '$baseUrl/api_terapis/history.php';
-
-    try {
-      final response = await http.get(
-        Uri.parse(url),
-        headers: {
-          'Content-Type': 'application/json',
-          'Accept': 'application/json',
-          'Authorization': 'Bearer $token',
-        },
-      );
-
-      _logDebug(url: url, method: "GET", statusCode: response.statusCode, responseBody: response.body);
-
-      if (response.statusCode == 200) {
-        return json.decode(response.body);
-      } else if (response.statusCode == 401) {
-        await logout();
-        return {'success': false, 'message': 'Sesi habis, silakan login lagi.'};
-      }
-      
-      try {
-        final errorData = json.decode(response.body);
-        return {'success': false, 'message': errorData['message'] ?? 'Gagal mengambil data history.'};
-      } catch (_) {
-        return {'success': false, 'message': 'Gagal mengambil data history (Status: ${response.statusCode})'};
-      }
-    } catch (e) {
-      return {'success': false, 'message': 'Kesalahan jaringan: $e'};
-    }
+  Future<Map<String, dynamic>> getHistoryList({String? search}) async {
+    return await getJobs(status: 'closed', search: search);
   }
 
   // =========================================================================
-  // 6. MENGAMBIL DETAIL RIWAYAT PEKERJAAN
+  // MENGAMBIL DETAIL RIWAYAT PEKERJAAN (HISTORY DETAIL)
   // =========================================================================
   Future<Map<String, dynamic>> getHistoryDetail(String idTransaksi) async {
     final String? token = await _getToken();
@@ -409,7 +419,7 @@ class ApiService {
   }
 
   // =========================================================================
-  // 7. RATE CUSTOMER (LAPORAN KUNJUNGAN)
+  // RATE CUSTOMER (LAPORAN KUNJUNGAN)
   // =========================================================================
   Future<Map<String, dynamic>> rateCustomer({
     required String idTransaksi,
@@ -457,7 +467,7 @@ class ApiService {
   }
 
   // =========================================================================
-  // 9. LOGIN
+  // LOGIN
   // =========================================================================
   Future<Map<String, dynamic>> login(String username, String password) async {
     final String url = '$baseUrl/api_terapis/login.php';
@@ -497,7 +507,7 @@ class ApiService {
   }
 
   // =========================================================================
-  // 10. LOGOUT
+  // LOGOUT
   // =========================================================================
   Future<void> logout() async {
     final prefs = await SharedPreferences.getInstance();
@@ -506,7 +516,7 @@ class ApiService {
   }
 
   // =========================================================================
-  // 🔥 11. MENGAMBIL SALDO TERAPIS (GET BALANCE) 
+  // MENGAMBIL SALDO TERAPIS (GET BALANCE) 
   // =========================================================================
   Future<Map<String, dynamic>> getBalance({
     String? source,
@@ -555,7 +565,7 @@ class ApiService {
   }
 
   // =========================================================================
-  // 🔥 12. SUBMIT PENARIKAN DANA (PAYOUT REQUEST)
+  // SUBMIT PENARIKAN DANA (PAYOUT REQUEST)
   // =========================================================================
   Future<Map<String, dynamic>> submitPayoutRequest({
     required String jenisPayout,
@@ -612,7 +622,7 @@ class ApiService {
   }
 
   // =========================================================================
-  // 🔥 13. MENGAMBIL RIWAYAT PENARIKAN (PAYOUT HISTORY)
+  // MENGAMBIL RIWAYAT PENARIKAN (PAYOUT HISTORY)
   // =========================================================================
   Future<Map<String, dynamic>> getPayoutHistory({String? status}) async {
     final String? token = await _getToken();
@@ -655,7 +665,7 @@ class ApiService {
   }
 
   // =========================================================================
-  // 🔥 14. MENGAMBIL DETAIL PENARIKAN (PAYOUT DETAIL)
+  // MENGAMBIL DETAIL PENARIKAN (PAYOUT DETAIL)
   // =========================================================================
   Future<Map<String, dynamic>> getPayoutDetail(int idPayout) async {
     final String? token = await _getToken();
@@ -694,7 +704,7 @@ class ApiService {
   }
 
   // =========================================================================
-  // 🔥 15. MENGAMBIL PROFIL TERAPIS (GET PROFILE)
+  // MENGAMBIL PROFIL TERAPIS (GET PROFILE)
   // =========================================================================
   Future<Map<String, dynamic>> getProfile() async {
     final String? token = await _getToken();
@@ -726,6 +736,45 @@ class ApiService {
         return {'success': false, 'message': errorData['message'] ?? 'Gagal mengambil profil.'};
       } catch (_) {
         return {'success': false, 'message': 'Gagal mengambil profil (Status: ${response.statusCode})'};
+      }
+    } catch (e) {
+      return {'success': false, 'message': 'Kesalahan jaringan: $e'};
+    }
+  }
+
+  // =========================================================================
+  // MENGAMBIL DATA DIRI TERAPIS (GET DATA DIRI)
+  // =========================================================================
+  Future<Map<String, dynamic>> getDataDiri() async {
+    final String? token = await _getToken();
+    if (token == null) return {'success': false, 'message': 'Token tidak ditemukan'};
+
+    final String url = '$baseUrl/api_terapis/get_data_diri.php';
+
+    try {
+      final response = await http.get(
+        Uri.parse(url),
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json',
+          'Authorization': 'Bearer $token',
+        },
+      );
+
+      _logDebug(url: url, method: "GET", statusCode: response.statusCode, responseBody: response.body);
+
+      if (response.statusCode == 200 || response.statusCode == 404) {
+        return json.decode(response.body);
+      } else if (response.statusCode == 401) {
+        await logout(); 
+        return {'success': false, 'message': 'Sesi habis, silakan login lagi.'};
+      }
+
+      try {
+        final errorData = json.decode(response.body);
+        return {'success': false, 'message': errorData['message'] ?? 'Gagal mengambil data diri.'};
+      } catch (_) {
+        return {'success': false, 'message': 'Gagal mengambil data diri (Status: ${response.statusCode})'};
       }
     } catch (e) {
       return {'success': false, 'message': 'Kesalahan jaringan: $e'};

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:therapist_momnjo/data/api_service.dart';
+import 'package:intl/intl.dart'; // Jangan lupa import intl untuk format waktu
 
 class ActivityDetailScreen extends StatefulWidget {
   const ActivityDetailScreen({Key? key}) : super(key: key);
@@ -20,15 +21,8 @@ class _ActivityDetailScreenState extends State<ActivityDetailScreen> {
   bool _isSubmittingRating = false;
   String? _errorMessage;
 
-  // State untuk Bagian 5 (Rating dari Terapis)
-  int _therapistRating = 0;
-  final List<String> _selectedTags = [];
+  // State untuk Bagian 4 (Catatan Laporan dari Terapis)
   final TextEditingController _notesController = TextEditingController();
-
-  final List<String> _ratingTags = [
-    'Ramah', 'Tepat Waktu', 'Kooperatif', 
-    'Ruangan Bersih', 'Banyak Maunya', 'Sulit Dihubungi'
-  ];
 
   @override
   void didChangeDependencies() {
@@ -91,23 +85,16 @@ class _ActivityDetailScreenState extends State<ActivityDetailScreen> {
     }
   }
 
-  // --- FUNGSI SUBMIT RATING ---
+  // --- FUNGSI SUBMIT LAPORAN (TANPA BINTANG/TAGS) ---
   Future<void> _submitRating() async {
-    if (_therapistRating == 0) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Harap berikan rating (bintang) terlebih dahulu.'), backgroundColor: Colors.redAccent),
-      );
-      return;
-    }
-
     setState(() => _isSubmittingRating = true);
 
     try {
       final api = ApiService();
       final response = await api.rateCustomer(
         idTransaksi: _idTransaksi,
-        rating: _therapistRating,
-        tags: _selectedTags,
+        rating: 0, // Default 0 karena sistem bintang dihilangkan
+        tags: [],  // Default list kosong karena sistem tags dihilangkan
         notes: _notesController.text.trim(),
       );
 
@@ -115,12 +102,12 @@ class _ActivityDetailScreenState extends State<ActivityDetailScreen> {
         setState(() => _isSubmittingRating = false);
         if (response['status'] == 'success' || response['success'] == true) {
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Rating berhasil dikirim!'), backgroundColor: Colors.green),
+            const SnackBar(content: Text('Catatan berhasil dikirim!'), backgroundColor: Colors.green),
           );
           _fetchDetail(); // Refresh data
         } else {
           ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text(response['message'] ?? 'Gagal mengirim rating.'), backgroundColor: Colors.redAccent),
+            SnackBar(content: Text(response['message'] ?? 'Gagal mengirim catatan.'), backgroundColor: Colors.redAccent),
           );
         }
       }
@@ -186,7 +173,6 @@ class _ActivityDetailScreenState extends State<ActivityDetailScreen> {
     final infoPelanggan = _detailData!['informasi_pelanggan'] ?? {};
     final infoTreatment = _detailData!['informasi_treatment'] ?? {};
     final infoWaktu = _detailData!['informasi_waktu'] ?? {};
-    final ratePelanggan = _detailData!['penilaian_pelanggan'] ?? {};
     final rateTerapis = _detailData!['penilaian_terapis'] ?? {};
 
     return GestureDetector(
@@ -209,16 +195,13 @@ class _ActivityDetailScreenState extends State<ActivityDetailScreen> {
             _buildSection2TreatmentInfo(infoTreatment),
             const SizedBox(height: 16),
             
-            // 🔥 SECTION WAKTU DENGAN NULL CHECKER SADIS
-            _buildSection3TimeInfo(infoWaktu),
-            
-            const SizedBox(height: 16),
-            _buildSection4CustomerRating(ratePelanggan),
+            // 🔥 Lempar infoTreatment juga untuk ambil datanya
+            _buildSection3TimeInfo(infoWaktu, infoTreatment),
             const SizedBox(height: 16),
             
             rateTerapis['is_submitted'] == true 
-                ? _buildSection5TherapistRatingReadOnly(rateTerapis)
-                : _buildSection5TherapistRatesCustomerForm(),
+                ? _buildSection4TherapistRatingReadOnly(rateTerapis)
+                : _buildSection4TherapistRatesCustomerForm(),
                 
             const SizedBox(height: 40),
           ],
@@ -368,21 +351,55 @@ class _ActivityDetailScreenState extends State<ActivityDetailScreen> {
     );
   }
 
-  // 🔥 3. INFORMASI WAKTU DENGAN NULL CHECKER
-  Widget _buildSection3TimeInfo(Map<String, dynamic> data) {
-    String rawStart = data['start_time']?.toString() ?? '';
-    String rawEnd = data['end_time']?.toString() ?? '';
-    String rawDuration = data['total_duration']?.toString() ?? '';
+  // 🔥 3. INFORMASI WAKTU DENGAN KALKULASI PINTAR (Di-Update)
+  Widget _buildSection3TimeInfo(Map<String, dynamic> dataWaktu, Map<String, dynamic> dataTreatment) {
+    String rawStart = dataWaktu['start_time']?.toString() ?? '';
+    String rawEnd = dataWaktu['end_time']?.toString() ?? '';
+    String rawDuration = dataWaktu['total_duration']?.toString() ?? '';
 
-    // Antisipasi string "null" dari balasan PHP
     if (rawStart.toLowerCase() == 'null') rawStart = '';
     if (rawEnd.toLowerCase() == 'null') rawEnd = '';
     if (rawDuration.toLowerCase() == 'null') rawDuration = '';
 
-    // Set fallback biar kelihatan jelas kalau backend emang kosong
-    String startTimeStr = rawStart.isNotEmpty ? rawStart : 'Belum tercatat';
-    String endTimeStr = rawEnd.isNotEmpty ? rawEnd : 'Belum tercatat';
-    String totalDuration = rawDuration.isNotEmpty ? rawDuration : '-';
+    // Ekstrak durasi (angka)
+    int durasiMenit = 0;
+    if (rawDuration.isNotEmpty) {
+      durasiMenit = int.tryParse(rawDuration.replaceAll(RegExp(r'[^0-9]'), '')) ?? 0;
+    }
+
+    // Jika dari waktu tidak ada, coba ambil durasi dari nama treatment (misal: "Deep Tissue 80 min")
+    if (durasiMenit == 0) {
+      String tName = dataTreatment['treatment_name']?.toString() ?? '';
+      final match = RegExp(r'(\d+)\s*(min|menit|mins|m)').firstMatch(tName.toLowerCase());
+      if (match != null) {
+        durasiMenit = int.tryParse(match.group(1) ?? '60') ?? 60;
+      } else {
+        durasiMenit = 60; // Fallback kalau gak ketemu angka
+      }
+    }
+
+    String displayMulai = 'Belum tercatat';
+    String displaySelesai = 'Belum tercatat';
+    String displayDurasi = (rawDuration.isNotEmpty && rawDuration != '-') ? rawDuration : '$durasiMenit menit';
+
+    if (rawStart.isNotEmpty && rawStart != '-') {
+      try {
+        DateTime startDt = DateTime.parse(rawStart);
+        displayMulai = DateFormat('yyyy-MM-dd HH:mm:ss').format(startDt);
+        
+        if (rawEnd.isNotEmpty && rawEnd != '-') {
+          DateTime endDt = DateTime.parse(rawEnd);
+          displaySelesai = DateFormat('yyyy-MM-dd HH:mm:ss').format(endDt);
+        } else {
+          // HITUNG OTOMATIS WAKTU SELESAI
+          DateTime calculatedEndDt = startDt.add(Duration(minutes: durasiMenit));
+          displaySelesai = DateFormat('yyyy-MM-dd HH:mm:ss').format(calculatedEndDt);
+        }
+      } catch (e) {
+        displayMulai = rawStart;
+        displaySelesai = rawEnd.isNotEmpty ? rawEnd : 'Belum tercatat';
+      }
+    }
 
     return _buildBaseCard(
       titleNumber: '3',
@@ -398,11 +415,11 @@ class _ActivityDetailScreenState extends State<ActivityDetailScreen> {
               const SizedBox(width: 8),
               Expanded(
                 child: Text(
-                  startTimeStr, 
+                  displayMulai, 
                   style: TextStyle(
                     fontSize: 13, 
                     fontWeight: FontWeight.bold, 
-                    color: startTimeStr == 'Belum tercatat' ? Colors.redAccent : textDarkBrown
+                    color: displayMulai == 'Belum tercatat' ? Colors.redAccent : textDarkBrown
                   ),
                   textAlign: TextAlign.right,
                 ),
@@ -418,11 +435,11 @@ class _ActivityDetailScreenState extends State<ActivityDetailScreen> {
               const SizedBox(width: 8),
               Expanded(
                 child: Text(
-                  endTimeStr, 
+                  displaySelesai, 
                   style: TextStyle(
                     fontSize: 13, 
                     fontWeight: FontWeight.bold, 
-                    color: endTimeStr == 'Belum tercatat' ? Colors.redAccent : textDarkBrown
+                    color: displaySelesai == 'Belum tercatat' ? Colors.redAccent : textDarkBrown
                   ),
                   textAlign: TextAlign.right,
                 ),
@@ -438,11 +455,11 @@ class _ActivityDetailScreenState extends State<ActivityDetailScreen> {
               const SizedBox(width: 8),
               Expanded(
                 child: Text(
-                  totalDuration, 
+                  displayDurasi, 
                   style: TextStyle(
                     fontSize: 13, 
                     fontWeight: FontWeight.bold, 
-                    color: totalDuration == '-' ? Colors.redAccent : primaryPeach
+                    color: displayDurasi == '-' ? Colors.redAccent : primaryPeach
                   ),
                   textAlign: TextAlign.right,
                 ),
@@ -454,130 +471,22 @@ class _ActivityDetailScreenState extends State<ActivityDetailScreen> {
     );
   }
 
-  // 4. Penilaian Pelanggan
-  Widget _buildSection4CustomerRating(Map<String, dynamic> data) {
-    bool isRated = data['is_rated'] ?? false;
-
-    if (!isRated) {
-      return _buildBaseCard(
-        titleNumber: '4',
-        title: 'Penilaian Pelanggan',
-        content: Text(
-          'Pelanggan belum memberikan ulasan untuk layanan ini.',
-          style: TextStyle(fontSize: 13, fontStyle: FontStyle.italic, color: Colors.grey.shade600),
-        ),
-      );
-    }
-
-    int rating = int.tryParse(data['stars']?.toString() ?? '0') ?? 0;
-    
+  // 4. Laporan Kunjungan (HANYA KOLOM CATATAN)
+  Widget _buildSection4TherapistRatesCustomerForm() {
     return _buildBaseCard(
       titleNumber: '4',
-      title: 'Penilaian Pelanggan',
+      title: 'Laporan Kunjungan',
       content: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
-            children: [
-              Row(
-                children: List.generate(5, (index) {
-                  return Icon(
-                    index < rating ? Icons.star : Icons.star_border,
-                    color: Colors.amber,
-                    size: 24,
-                  );
-                }),
-              ),
-              const SizedBox(width: 8),
-              Text('$rating of 5', style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: textDarkBrown)),
-            ],
-          ),
-          const SizedBox(height: 12),
-          Text(
-            '"${data['feedback'] ?? '-'}"',
-            style: TextStyle(fontSize: 13, fontStyle: FontStyle.italic, color: textDarkBrown.withOpacity(0.8)),
-          ),
-          const SizedBox(height: 4),
-          Text('Customer Feedback', style: TextStyle(fontSize: 11, color: Colors.grey.shade500, fontWeight: FontWeight.bold)),
-        ],
-      ),
-    );
-  }
-
-  // 5. Terapis Menilai Pelanggan (MODE FORM)
-  Widget _buildSection5TherapistRatesCustomerForm() {
-    return _buildBaseCard(
-      titleNumber: '5',
-      title: 'Terapis Menilai Pelanggan',
-      content: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text('Nilai Pelanggan', style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: textDarkBrown)),
+          Text('Catatan / Laporan Pelayanan (Opsional)', style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: textDarkBrown)),
           const SizedBox(height: 8),
-          
-          Row(
-            children: List.generate(5, (index) {
-              return GestureDetector(
-                onTap: () {
-                  setState(() {
-                    _therapistRating = index + 1;
-                  });
-                },
-                child: Padding(
-                  padding: const EdgeInsets.only(right: 4.0),
-                  child: Icon(
-                    index < _therapistRating ? Icons.star : Icons.star_border,
-                    color: Colors.amber,
-                    size: 32,
-                  ),
-                ),
-              );
-            }),
-          ),
-          const SizedBox(height: 16),
-          
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: _ratingTags.map((tag) {
-              bool isSelected = _selectedTags.contains(tag);
-              return GestureDetector(
-                onTap: () {
-                  setState(() {
-                    if (isSelected) {
-                      _selectedTags.remove(tag);
-                    } else {
-                      _selectedTags.add(tag);
-                    }
-                  });
-                },
-                child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                  decoration: BoxDecoration(
-                    color: isSelected ? textDarkBrown : Colors.white,
-                    border: Border.all(color: isSelected ? textDarkBrown : Colors.grey.shade300),
-                    borderRadius: BorderRadius.circular(20),
-                  ),
-                  child: Text(
-                    tag,
-                    style: TextStyle(
-                      fontSize: 12,
-                      fontWeight: isSelected ? FontWeight.bold : FontWeight.w500,
-                      color: isSelected ? Colors.white : textDarkBrown,
-                    ),
-                  ),
-                ),
-              );
-            }).toList(),
-          ),
-          const SizedBox(height: 16),
-
           TextField(
             controller: _notesController,
-            maxLines: 3,
+            maxLines: 4,
             style: TextStyle(fontSize: 13, color: textDarkBrown),
             decoration: InputDecoration(
-              hintText: 'Catatan tambahan...',
+              hintText: 'Tuliskan laporan aktivitas atau catatan tambahan di sini...',
               hintStyle: TextStyle(fontSize: 13, color: Colors.grey.shade400),
               border: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(12),
@@ -604,7 +513,7 @@ class _ActivityDetailScreenState extends State<ActivityDetailScreen> {
               ),
               child: _isSubmittingRating 
                   ? const SizedBox(height: 20, width: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
-                  : const Text('Kirim Penilaian', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14)),
+                  : const Text('Kirim Laporan', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14)),
             ),
           ),
         ],
@@ -612,57 +521,16 @@ class _ActivityDetailScreenState extends State<ActivityDetailScreen> {
     );
   }
 
-  // 5B. Terapis Menilai Pelanggan (MODE READ-ONLY)
-  Widget _buildSection5TherapistRatingReadOnly(Map<String, dynamic> data) {
-    int rating = int.tryParse(data['stars']?.toString() ?? '0') ?? 0;
-    List<dynamic> submittedTags = data['tags'] ?? [];
+  // 4B. Terapis Menilai Pelanggan (MODE READ-ONLY UNTUK CATATAN SAJA)
+  Widget _buildSection4TherapistRatingReadOnly(Map<String, dynamic> data) {
     String notes = data['notes']?.toString() ?? '';
 
     return _buildBaseCard(
-      titleNumber: '5',
-      title: 'Laporan & Penilaian Anda',
+      titleNumber: '4',
+      title: 'Laporan Kunjungan',
       content: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
-            children: [
-              Row(
-                children: List.generate(5, (index) {
-                  return Icon(
-                    index < rating ? Icons.star : Icons.star_border,
-                    color: Colors.amber,
-                    size: 24,
-                  );
-                }),
-              ),
-              const SizedBox(width: 8),
-              Text('$rating of 5', style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: textDarkBrown)),
-            ],
-          ),
-          const SizedBox(height: 12),
-          
-          if (submittedTags.isNotEmpty) ...[
-            Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: submittedTags.map((tag) {
-                return Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                  decoration: BoxDecoration(
-                    color: primaryPeach.withOpacity(0.1),
-                    border: Border.all(color: primaryPeach),
-                    borderRadius: BorderRadius.circular(20),
-                  ),
-                  child: Text(
-                    tag.toString(),
-                    style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: textDarkBrown),
-                  ),
-                );
-              }).toList(),
-            ),
-            const SizedBox(height: 12),
-          ],
-
           if (notes.isNotEmpty)
             Container(
               width: double.infinity,
@@ -676,6 +544,11 @@ class _ActivityDetailScreenState extends State<ActivityDetailScreen> {
                 '"$notes"',
                 style: TextStyle(fontSize: 13, fontStyle: FontStyle.italic, color: textDarkBrown.withOpacity(0.8)),
               ),
+            )
+          else
+            Text(
+              'Anda tidak meninggalkan catatan untuk aktivitas ini.',
+              style: TextStyle(fontSize: 13, fontStyle: FontStyle.italic, color: Colors.grey.shade500),
             ),
         ],
       ),

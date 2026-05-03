@@ -91,25 +91,27 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
     setState(() {
       _filteredSchedules = _apiSchedules.where((schedule) {
         
-        // 1. FILTER STATUS (Diperlonggar, hanya membuang yang benar-benar selesai/batal)
-        final String status = (schedule['status'] ?? schedule['booking_status'] ?? '').toString().toLowerCase().trim();
-        if (['close', 'closed', 'completed', 'selesai', 'cancel', 'batal', 'canceled'].contains(status)) {
-          return false; 
-        }
-
-        // 1B. FILTER TAMBAHAN (Cek isi layanannya)
+        // 1. FILTER STATUS TREATMENT (Bukan cuma status booking)
+        // Cek apakah semua layanan di dalam transaksi ini sudah dikerjakan (is_done == true)
         final List<dynamic> treatments = schedule['treatments'] ?? [];
         if (treatments.isNotEmpty) {
           bool isAllTreatmentsDone = treatments.every((item) {
             return item is Map && item['is_done'] == true;
           });
           
+          // Jika SEMUA treatment sudah selesai dikerjakan terapis, SEMBUNYIKAN dari tab Tugas.
           if (isAllTreatmentsDone) {
-            return false; // Sembunyikan kalau semua layanan sudah selesai
+            return false; 
+          }
+        } else {
+          // Jika array treatments kosong, baru kita cek status bookingnya (jaga-jaga)
+          final String status = (schedule['status'] ?? schedule['booking_status'] ?? '').toString().toLowerCase().trim();
+          if (['cancel', 'batal', 'canceled'].contains(status)) {
+            return false; 
           }
         }
 
-        // 2. FILTER TIPE LAYANAN (Home Service vs Onsite) -> Menggunakan Multi-Key Checker
+        // 2. FILTER TIPE LAYANAN (Home Service vs Onsite)
         String roomTypeStr = (schedule['room_type'] ?? schedule['type'] ?? schedule['kategori'] ?? '').toString().toLowerCase();
         
         // Jika backend mengirim 'home', 'kunjungan', atau kosong, anggap Home Service.
@@ -366,6 +368,7 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
   Widget _buildScheduleCard(Map<dynamic, dynamic> schedule) {
     String roomTypeStr = (schedule['room_type'] ?? schedule['type'] ?? schedule['kategori'] ?? '').toString().toLowerCase();
     bool isHomeService = roomTypeStr.contains('home') || roomTypeStr.contains('kunjungan') || roomTypeStr.isEmpty;
+    
     
     final String formattedTime = _formatTime(schedule['start_time']?.toString() ?? schedule['jadwal']?.toString());
     

@@ -318,7 +318,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
       ),
       child: Column(
         children: [
-          _buildInfoRow('Area Kerja', 'Bandung & Cimahi'), 
+          _buildInfoRow('Gerai', 'Bandung & Cimahi'), 
         ],
       ),
     );

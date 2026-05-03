@@ -21,6 +21,7 @@ class _BookingDetailScreenState extends State<BookingDetailScreen> {
   Map<String, dynamic>? _data;
   bool _isInitialized = false;
   bool _isUpdatingStatus = false; 
+  bool _isLoadingDetail = false; // Flag untuk loading detail terbaru dari API
   
   // Variabel untuk menyimpan data Selfie & Lokasi
   String? _arrivalPhotoPath; 
@@ -36,7 +37,7 @@ class _BookingDetailScreenState extends State<BookingDetailScreen> {
     if (!_isInitialized) {
       final args = ModalRoute.of(context)?.settings.arguments as Map<String, dynamic>?;
       if (args != null) {
-        _data = args;
+        _data = Map<String, dynamic>.from(args); // Copy agar bisa dimodifikasi
         String passedStatus = args['booking_status'] ?? args['status'] ?? 'Open';
         passedStatus = passedStatus.trim(); 
         
@@ -44,10 +45,40 @@ class _BookingDetailScreenState extends State<BookingDetailScreen> {
           passedStatus = 'Accepted';
         }
         _currentStatus = passedStatus;
+
+        // Fetch detail terbaru untuk mendapatkan alamat lengkap & koordinat
+        final idTrans = _data?['id_transaksi']?.toString();
+        if (idTrans != null && idTrans.isNotEmpty) {
+          _loadJobDetail(idTrans);
+        }
       } else {
         _currentStatus = 'Accepted';
       }
       _isInitialized = true;
+    }
+  }
+
+  // --- FUNGSI MENGAMBIL DETAIL TERBARU DARI API ---
+  Future<void> _loadJobDetail(String idTransaksi) async {
+    setState(() => _isLoadingDetail = true);
+    
+    final response = await ApiService().getJobDetail(idTransaksi);
+    
+    if (mounted && response['success'] == true) {
+      setState(() {
+        // Gabungkan data baru dari API (seperti address, coordinate_address) ke _data
+        _data!['address'] = response['address'];
+        _data!['coordinate_address'] = response['coordinate_address'];
+        _data!['catatan_alamat'] = response['catatan_alamat'];
+        
+        if (response['data'] != null && response['data'] is List) {
+          _data!['treatments'] = response['data']; // Update daftar layanan jika ada perubahan
+        }
+      });
+    }
+    
+    if (mounted) {
+      setState(() => _isLoadingDetail = false);
     }
   }
 
@@ -71,6 +102,33 @@ class _BookingDetailScreenState extends State<BookingDetailScreen> {
       case 'completed': 
       case 'closed': return 'Selesai';
       default: return status.toUpperCase();
+    }
+  }
+
+  // --- FUNGSI MEMBUKA GOOGLE MAPS ---
+  Future<void> _openMap(String coordinate) async {
+    if (coordinate.isEmpty) return;
+
+    final cleanCoordinate = coordinate.replaceAll(' ', '');
+    // Coba buka dengan intent navigasi (biasanya langsung buka mode arahkan jalan di Android)
+    final Uri googleMapsUrl = Uri.parse("google.navigation:q=$cleanCoordinate");
+    // Fallback URL jika device tidak support URL navigasi intent (contohnya iOS)
+    final Uri fallbackUrl = Uri.parse("https://www.google.com/maps/search/?api=1&query=$cleanCoordinate");
+
+    try {
+      if (await canLaunchUrl(googleMapsUrl)) {
+        await launchUrl(googleMapsUrl, mode: LaunchMode.externalApplication);
+      } else if (await canLaunchUrl(fallbackUrl)) {
+        await launchUrl(fallbackUrl, mode: LaunchMode.externalApplication);
+      } else {
+        throw 'Aplikasi Maps tidak ditemukan';
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Tidak dapat membuka Maps: $e'), backgroundColor: Colors.red),
+        );
+      }
     }
   }
 
@@ -284,7 +342,7 @@ class _BookingDetailScreenState extends State<BookingDetailScreen> {
     
     final String roomType = _data?['room_type']?.toString() ?? '';
     final String gerai = _data?['gerai']?.toString() ?? '';
-    String alamat = [gerai, roomType].where((e) => e.isNotEmpty).join(' - ');
+    String defaultAlamat = [gerai, roomType].where((e) => e.isNotEmpty).join(' - ');
 
     final List<dynamic> layananList = _data?['treatments'] ?? [];
 
@@ -297,33 +355,45 @@ class _BookingDetailScreenState extends State<BookingDetailScreen> {
         backgroundColor: Colors.white,
         elevation: 0.5,
       ),
-      body: Column(
+      body: Stack(
         children: [
-          Expanded(
-            child: SingleChildScrollView(
-              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  _buildProfileCard(nama, telepon, _currentStatus),
-                  const SizedBox(height: 16),
-                  _buildBookingInfoCard(idBooking, idTransaksi, startTime), 
-                  const SizedBox(height: 16),
-                  _buildLocationCard(alamat),
-                  const SizedBox(height: 16),
-                  _buildServiceCard(layananList), 
-                  const SizedBox(height: 16),
-                  _buildNotesCard(),
-                  const SizedBox(height: 24),
-                  const Text('Timeline Status', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.black87)),
-                  const SizedBox(height: 16),
-                  _buildTimeline(_currentStatus),
-                  const SizedBox(height: 40),
-                ],
+          Column(
+            children: [
+              Expanded(
+                child: SingleChildScrollView(
+                  padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      _buildProfileCard(nama, telepon, _currentStatus),
+                      const SizedBox(height: 16),
+                      _buildBookingInfoCard(idBooking, idTransaksi, startTime), 
+                      const SizedBox(height: 16),
+                      // Pass default alamat untuk diolah di dalam widget lokasi
+                      _buildLocationCard(defaultAlamat),
+                      const SizedBox(height: 16),
+                      _buildServiceCard(layananList), 
+                      const SizedBox(height: 16),
+                      _buildNotesCard(),
+                      const SizedBox(height: 24),
+                      const Text('Timeline Status', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.black87)),
+                      const SizedBox(height: 16),
+                      _buildTimeline(_currentStatus),
+                      const SizedBox(height: 40),
+                    ],
+                  ),
+                ),
+              ),
+              _buildBottomButton(),
+            ],
+          ),
+          if (_isLoadingDetail)
+            Container(
+              color: Colors.black12,
+              child: const Center(
+                child: CircularProgressIndicator(),
               ),
             ),
-          ),
-          _buildBottomButton(),
         ],
       ),
     );
@@ -406,25 +476,59 @@ class _BookingDetailScreenState extends State<BookingDetailScreen> {
     return Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [Text(label, style: const TextStyle(fontSize: 13, color: Colors.black87)), Text(value, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: Colors.black87))]);
   }
 
-  Widget _buildLocationCard(String alamat) {
+  Widget _buildLocationCard(String defaultAlamat) {
+    // Gunakan alamat lengkap dari API Detail jika ada, jika tidak gunakan default gabungan Gerai & Room.
+    final String address = _data?['address']?.toString() ?? defaultAlamat;
+    final String catatan = _data?['catatan_alamat']?.toString() ?? _data?['patokan']?.toString() ?? 'Tidak ada catatan alamat/patokan khusus';
+    final String coordinate = _data?['coordinate_address']?.toString() ?? '';
+
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(16), boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.03), blurRadius: 8)]),
-      child: Row(
+      child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Icon(Icons.location_on_outlined, color: Colors.black87, size: 24),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(alamat, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold)),
-                const SizedBox(height: 4),
-                Text(_data?['patokan'] ?? 'Tidak ada catatan patokan khusus', style: const TextStyle(fontSize: 13, color: Colors.black54)),
-              ],
-            ),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Icon(Icons.location_on_outlined, color: Colors.black87, size: 24),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(address, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold)),
+                    const SizedBox(height: 4),
+                    Text(catatan, style: const TextStyle(fontSize: 13, color: Colors.black54)),
+                  ],
+                ),
+              ),
+            ],
           ),
+          
+          // --- TOMBOL MAPS MUNCUL JIKA KOORDINAT TERSEDIA DARI API ---
+          if (coordinate.isNotEmpty) ...[
+            const Padding(
+              padding: EdgeInsets.symmetric(vertical: 12),
+              child: Divider(height: 1, color: Colors.black12),
+            ),
+            SizedBox(
+              width: double.infinity,
+              child: OutlinedButton.icon(
+                onPressed: () => _openMap(coordinate),
+                icon: const Icon(Icons.map_rounded, size: 20, color: Color(0xFFE8647C)),
+                label: const Text(
+                  'Arahkan ke Lokasi (Maps)', 
+                  style: TextStyle(color: Color(0xFFE8647C), fontWeight: FontWeight.bold)
+                ),
+                style: OutlinedButton.styleFrom(
+                  side: const BorderSide(color: Color(0xFFE8647C)),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                  padding: const EdgeInsets.symmetric(vertical: 12),
+                ),
+              ),
+            )
+          ]
         ],
       ),
     );
@@ -440,7 +544,7 @@ class _BookingDetailScreenState extends State<BookingDetailScreen> {
           const Text('Layanan yang Dipilih', style: TextStyle(fontSize: 12, color: Colors.black54, fontWeight: FontWeight.bold)),
           const SizedBox(height: 12),
           ...layananList.map((item) {
-            String name = item is Map ? (item['name'] ?? 'Layanan') : item.toString();
+            String name = item is Map ? (item['name'] ?? item['product_name'] ?? 'Layanan') : item.toString();
             bool isDone = item is Map ? (item['is_done'] == true) : false;
             return Padding(
               padding: const EdgeInsets.only(bottom: 12),
@@ -570,20 +674,91 @@ class _BookingDetailScreenState extends State<BookingDetailScreen> {
     if (s == 'pemeriksaan') {
       return _buildSingleActionButton('MULAI SESI TREATMENT', () async {
         await _updateStatusAPI('Started');
-        if (mounted) Navigator.pushNamed(context, '/active_job', arguments: _data);
+        if (mounted) {
+          final result = await Navigator.pushNamed(context, '/active_job', arguments: _data);
+          
+          if (result != null && result is Map && result['action'] == 'finish_treatment') {
+             // UPDATE: Pindah langsung ke layar laporan saat kembali dari timer
+             setState(() {
+               _currentStatus = 'Closed';
+               _data?['booking_status'] = 'Closed';
+             });
+             Navigator.pushReplacementNamed(context, '/visit_report', arguments: _data);
+          }
+        }
       });
     }
 
     if (s == 'started') {
       return _buildSingleActionButton('SELESAIKAN KUNJUNGAN', () async {
+        setState(() { _isUpdatingStatus = true; }); 
+        
+        final api = ApiService();
+        final List<dynamic> treatments = _data?['treatments'] ?? [];
+        final String idTransaksi = _data?['id_transaksi']?.toString() ?? '';
+
+        // 1. Tembak API Finish untuk SEMUA layanan agar is_done menjadi true
+        for (var item in treatments) {
+          bool alreadyDone = item is Map && item['is_done'] == true;
+          if (!alreadyDone) {
+            String pName = '';
+            if (item is Map) {
+              pName = (item['product_name'] ?? item['name'] ?? '').toString().trim();
+            } else {
+              pName = item.toString().trim();
+            }
+
+            if (pName.isNotEmpty && idTransaksi.isNotEmpty) {
+              await api.updateJobStatus(
+                idTransaksi: idTransaksi,
+                action: 'finish',
+                productName: pName,
+              );
+            }
+          }
+        }
+
+        // 2. Tutup status booking utamanya
         await _updateStatusAPI('Closed');
+        
+        setState(() { _isUpdatingStatus = false; });
+        
+        // 3. Pindah ke halaman laporan
         if (mounted) Navigator.pushReplacementNamed(context, '/visit_report', arguments: _data);
       });
     }
 
     if (s == 'completed' || s == 'closed') {
-      return _buildSingleActionButton('BUAT LAPORAN KUNJUNGAN', () {
-        Navigator.pushReplacementNamed(context, '/visit_report', arguments: _data);
+      return _buildSingleActionButton('BUAT LAPORAN KUNJUNGAN', () async {
+        setState(() { _isUpdatingStatus = true; }); 
+        
+        final api = ApiService();
+        final List<dynamic> treatments = _data?['treatments'] ?? [];
+        final String idTransaksi = _data?['id_transaksi']?.toString() ?? '';
+
+        // PASTIKAN SEMUA TREATMENT DI-FINISH (Sapu bersih jika status telanjur Closed tapi is_done masih false)
+        for (var item in treatments) {
+          bool alreadyDone = item is Map && item['is_done'] == true;
+          if (!alreadyDone) {
+            String pName = '';
+            if (item is Map) {
+              pName = (item['product_name'] ?? item['name'] ?? '').toString().trim();
+            } else {
+              pName = item.toString().trim();
+            }
+
+            if (pName.isNotEmpty && idTransaksi.isNotEmpty) {
+              await api.updateJobStatus(
+                idTransaksi: idTransaksi,
+                action: 'finish',
+                productName: pName,
+              );
+            }
+          }
+        }
+        
+        setState(() { _isUpdatingStatus = false; });
+        if (mounted) Navigator.pushReplacementNamed(context, '/visit_report', arguments: _data);
       });
     }
 
