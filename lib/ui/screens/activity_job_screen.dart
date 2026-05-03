@@ -411,7 +411,7 @@ class _ActivityScreenState extends State<ActivityScreen> {
                   borderRadius: BorderRadius.circular(20),
                 ),
                 child: Text(
-                  'COMPLETED',
+                  'SELESAI',
                   style: TextStyle(color: textGreen, fontSize: 10, fontWeight: FontWeight.bold),
                 ),
               ),

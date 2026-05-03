@@ -511,7 +511,17 @@ class ApiService {
   // =========================================================================
   Future<void> logout() async {
     final prefs = await SharedPreferences.getInstance();
+    
+    // 🔥 PERBAIKAN: Selamatkan riwayat absensi sebelum memori dibersihkan
+    final String? savedAttendance = prefs.getString('attendance_history');
+    
     await prefs.clear(); // Bersihkan semua data sesi
+    
+    // 🔥 Kembalikan riwayat absensi ke dalam memori setelah dibersihkan
+    if (savedAttendance != null) {
+      await prefs.setString('attendance_history', savedAttendance);
+    }
+    
     debugPrint("------------------- 🚀 API LOG: LOGOUT LOCAL SUCCESS 🚀 -------------------");
   }
 
