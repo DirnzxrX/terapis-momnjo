@@ -85,7 +85,7 @@ class ApiService {
   }
 
   // =========================================================================
-  // 🔥 2. GET JOB DETAIL (TERBARU DARI BACKEND)
+  // 🔥 2. GET JOB DETAIL
   // =========================================================================
   Future<Map<String, dynamic>> getJobDetail(String idTransaksi) async {
     final String? token = await _getToken();
@@ -141,18 +141,25 @@ class ApiService {
     final String? token = await _getToken();
     if (token == null) return {'success': false, 'message': 'Token tidak ditemukan'};
 
-    final String url = '$baseUrl/api_terapis/update_job_status.php';
+    final String url = '$baseUrl/api_terapis/update_service.php';
+    
+    String mappedStatus = action;
+    if (action.toLowerCase() == 'arrived') mappedStatus = 'Arrived';
+    else if (action.toLowerCase() == 'start') mappedStatus = 'In Progress';
+    else if (action.toLowerCase() == 'finish') mappedStatus = 'Completed';
 
     try {
       http.Response response;
 
-      if (action == 'arrived') {
+      if (action == 'arrived' || (imagePath != null && imagePath.isNotEmpty)) {
         var request = http.MultipartRequest('POST', Uri.parse(url));
         request.headers['Authorization'] = 'Bearer $token';
         request.headers['Accept'] = 'application/json';
 
         request.fields['id_transaksi'] = idTransaksi;
-        request.fields['action'] = action;
+        // 🔥 PROTEKSI GANDA: Kirim id_booking juga jika API bingung format MNJ...
+        request.fields['id_booking'] = idTransaksi; 
+        request.fields['status'] = mappedStatus; 
 
         if (imagePath != null && imagePath.isNotEmpty) {
           request.files.add(await http.MultipartFile.fromPath('image', imagePath));
@@ -166,7 +173,9 @@ class ApiService {
       else {
         final Map<String, dynamic> body = {
           'id_transaksi': idTransaksi,
-          'action': action,
+          // 🔥 PROTEKSI GANDA: Kirim id_booking juga jika API bingung format MNJ...
+          'id_booking': idTransaksi, 
+          'status': mappedStatus, 
         };
         if (productName != null && productName.isNotEmpty) {
           body['product_name'] = productName;
@@ -187,12 +196,16 @@ class ApiService {
 
       if (response.statusCode == 200 || response.statusCode == 400 || response.statusCode == 401 || response.statusCode == 404) {
         try {
-          final data = json.decode(response.body);
-          if (data['status'] == 'success') {
-            data['success'] = true;
-          } else {
-            data['success'] = false;
+          final Map<String, dynamic> data = json.decode(response.body);
+          
+          bool isSuccess = false;
+          if (data['success'] == true || data['success'] == 'true') {
+             isSuccess = true;
+          } else if (data['status'] == 'success') {
+             isSuccess = true;
           }
+          
+          data['success'] = isSuccess;
           return data;
         } catch (e) {
           String partialError = response.body;
@@ -252,6 +265,8 @@ class ApiService {
     final String? token = await _getToken();
     if (token == null) return {'success': false, 'message': 'Token tidak ditemukan'};
 
+    // 🔥 DIKEMBALIKAN KE ENDPOINT ASLI (update_booking_status.php)
+    // update_service.php hanya untuk treatment item.
     final String url = '$baseUrl/api_terapis/update_booking_status.php';
 
     try {
@@ -262,7 +277,7 @@ class ApiService {
         request.headers['Authorization'] = 'Bearer $token';
         request.headers['Accept'] = 'application/json';
         
-        request.fields['id_booking'] = idBooking;
+        request.fields['id_booking'] = idBooking; 
         request.fields['status'] = newStatus;
         
         request.files.add(await http.MultipartFile.fromPath('image', imagePath)); 
@@ -430,10 +445,13 @@ class ApiService {
     final String? token = await _getToken();
     if (token == null) return {'success': false, 'message': 'Token tidak ditemukan'};
 
-    final String url = '$baseUrl/api_terapis/rate_customer.php';
+    final String url = '$baseUrl/api_terapis/update_service.php';
     final Map<String, dynamic> body = {
       'id_transaksi': idTransaksi,
-      'rating': rating,
+      // 🔥 PROTEKSI GANDA
+      'id_booking': idTransaksi,
+      'status': 'Completed', 
+      'rating': rating > 0 ? rating : 5, 
       'tags': tags,
       'notes': notes,
     };
@@ -512,12 +530,10 @@ class ApiService {
   Future<void> logout() async {
     final prefs = await SharedPreferences.getInstance();
     
-    // 🔥 PERBAIKAN: Selamatkan riwayat absensi sebelum memori dibersihkan
     final String? savedAttendance = prefs.getString('attendance_history');
     
-    await prefs.clear(); // Bersihkan semua data sesi
+    await prefs.clear(); 
     
-    // 🔥 Kembalikan riwayat absensi ke dalam memori setelah dibersihkan
     if (savedAttendance != null) {
       await prefs.setString('attendance_history', savedAttendance);
     }
@@ -557,7 +573,15 @@ class ApiService {
       _logDebug(url: uri.toString(), method: "GET", statusCode: response.statusCode, responseBody: response.body);
 
       if (response.statusCode == 200) {
-        return json.decode(response.body);
+        final Map<String, dynamic> data = json.decode(response.body);
+        
+        if (data.containsKey('status')) {
+           data['success'] = data['status'] == 'success';
+        } else {
+           data['success'] = true; 
+        }
+        
+        return data;
       } else if (response.statusCode == 401) {
         await logout();
         return {'success': false, 'message': 'Sesi habis, silakan login lagi.'};
@@ -634,12 +658,18 @@ class ApiService {
   // =========================================================================
   // MENGAMBIL RIWAYAT PENARIKAN (PAYOUT HISTORY)
   // =========================================================================
-  Future<Map<String, dynamic>> getPayoutHistory({String? status}) async {
+  Future<Map<String, dynamic>> getPayoutHistory({
+    String? status,
+    String? startDate,
+    String? endDate,
+  }) async {
     final String? token = await _getToken();
     if (token == null) return {'success': false, 'message': 'Token tidak ditemukan'};
 
     final Map<String, String> queryParams = {};
     if (status != null && status.isNotEmpty) queryParams['status'] = status;
+    if (startDate != null && startDate.isNotEmpty) queryParams['start_date'] = startDate;
+    if (endDate != null && endDate.isNotEmpty) queryParams['end_date'] = endDate;
 
     final uri = Uri.parse('$baseUrl/api_terapis/get_payout_history.php')
         .replace(queryParameters: queryParams.isNotEmpty ? queryParams : null);
@@ -657,7 +687,15 @@ class ApiService {
       _logDebug(url: uri.toString(), method: "GET", statusCode: response.statusCode, responseBody: response.body);
 
       if (response.statusCode == 200) {
-        return json.decode(response.body);
+        final Map<String, dynamic> data = json.decode(response.body);
+        
+        if (data.containsKey('status')) {
+           data['success'] = data['status'] == 'success';
+        } else {
+           data['success'] = true;
+        }
+
+        return data;
       } else if (response.statusCode == 401) {
         await logout();
         return {'success': false, 'message': 'Sesi habis, silakan login lagi.'};
@@ -790,4 +828,220 @@ class ApiService {
       return {'success': false, 'message': 'Kesalahan jaringan: $e'};
     }
   }
+
+  // =========================================================================
+  // MENGAMBIL DATA CAROUSEL (BANNER TERAPIS)
+  // =========================================================================
+  Future<Map<String, dynamic>> getCarousel() async {
+    final String url = '$baseUrl/api_terapis/get_carousel.php';
+
+    try {
+      final response = await http.get(
+        Uri.parse(url),
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json',
+          // Tidak memerlukan Authorization sesuai spesifikasi backend
+        },
+      );
+
+      _logDebug(
+          url: url,
+          method: "GET",
+          statusCode: response.statusCode,
+          responseBody: response.body);
+
+      if (response.statusCode == 200) {
+        try {
+          return json.decode(response.body);
+        } catch (e) {
+          return {'success': false, 'message': 'Format response server tidak valid.'};
+        }
+      } else {
+        try {
+          final errorData = json.decode(response.body);
+          return {
+            'success': false,
+            'message': errorData['message'] ?? 'Gagal mengambil data carousel.'
+          };
+        } catch (_) {
+          return {
+            'success': false,
+            'message': 'Gagal mengambil data carousel (Status: ${response.statusCode})'
+          };
+        }
+      }
+    } catch (e) {
+      return {'success': false, 'message': 'Kesalahan jaringan: $e'};
+    }
+  }
+
+  // =========================================================================
+  // 🔥 CEK STATUS ABSENSI HARI INI (On Duty / Off Duty)
+  // =========================================================================
+  Future<Map<String, dynamic>> checkAttendanceStatus() async {
+    final String? token = await _getToken();
+    if (token == null) return {'success': false, 'message': 'Token tidak ditemukan'};
+
+    final String url = '$baseUrl/api_terapis/store_absensi.php';
+
+    try {
+      final response = await http.get(
+        Uri.parse(url),
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json',
+          'Authorization': 'Bearer $token',
+        },
+      );
+
+      _logDebug(url: url, method: "GET", statusCode: response.statusCode, responseBody: response.body);
+
+      if (response.statusCode == 200) {
+        return json.decode(response.body);
+      } else if (response.statusCode == 401) {
+        await logout();
+        return {'success': false, 'message': 'Sesi habis, silakan login lagi.'};
+      }
+
+      try {
+        final errorData = json.decode(response.body);
+        return {'success': false, 'message': errorData['message'] ?? 'Gagal mengambil status absensi.'};
+      } catch (_) {
+        return {'success': false, 'message': 'Gagal mengambil status absensi (Status: ${response.statusCode})'};
+      }
+    } catch (e) {
+      return {'success': false, 'message': 'Kesalahan jaringan: $e'};
+    }
+  }
+
+  // =========================================================================
+  // 🔥 KIRIM ABSENSI (Check-In atau Check-Out) MENDUKUNG FOTO & LOKASI
+  // =========================================================================
+  Future<Map<String, dynamic>> submitAttendance({
+    required String action, // "check_in" atau "check_out"
+    String? catatan,
+    String? imagePath,
+    String? lokasi,
+  }) async {
+    final String? token = await _getToken();
+    if (token == null) return {'success': false, 'message': 'Token tidak ditemukan'};
+
+    final String url = '$baseUrl/api_terapis/store_absensi.php';
+
+    try {
+      http.Response response;
+
+      // Jika ada gambar, gunakan request berjenis Multipart
+      if (imagePath != null && imagePath.isNotEmpty) {
+        var request = http.MultipartRequest('POST', Uri.parse(url));
+        request.headers['Authorization'] = 'Bearer $token';
+        request.headers['Accept'] = 'application/json';
+
+        request.fields['action'] = action;
+        if (catatan != null && catatan.isNotEmpty) request.fields['catatan'] = catatan;
+        if (lokasi != null && lokasi.isNotEmpty) request.fields['lokasi'] = lokasi;
+
+        request.files.add(await http.MultipartFile.fromPath('image', imagePath));
+
+        _logDebug(
+          url: url,
+          method: "POST (Multipart)",
+          requestBody: request.fields,
+          statusCode: 0,
+          responseBody: "Mengirim data absensi & foto...",
+        );
+
+        var streamedResponse = await request.send();
+        response = await http.Response.fromStream(streamedResponse);
+      } else {
+        // Jika tidak ada gambar, gunakan standard POST JSON form
+        final Map<String, dynamic> body = {
+          'action': action,
+          if (catatan != null && catatan.isNotEmpty) 'catatan': catatan,
+          if (lokasi != null && lokasi.isNotEmpty) 'lokasi': lokasi,
+        };
+
+        response = await http.post(
+          Uri.parse(url),
+          headers: {
+            'Content-Type': 'application/json',
+            'Accept': 'application/json',
+            'Authorization': 'Bearer $token',
+          },
+          body: json.encode(body),
+        );
+      }
+
+      _logDebug(url: url, method: "POST", statusCode: response.statusCode, responseBody: response.body);
+
+      if (response.statusCode == 200 || response.statusCode == 201) {
+        return json.decode(response.body);
+      } else if (response.statusCode == 400 || response.statusCode == 403) {
+        // Berhasil menerima tanggapan (Misal: ditolak karena belum check out)
+        try {
+          return json.decode(response.body);
+        } catch (_) {
+          return {'success': false, 'message': 'Terjadi kesalahan pemrosesan absensi.'};
+        }
+      } else if (response.statusCode == 401) {
+        await logout();
+        return {'success': false, 'message': 'Sesi habis, silakan login lagi.'};
+      }
+
+      try {
+        final errorData = json.decode(response.body);
+        return {'success': false, 'message': errorData['message'] ?? 'Gagal mengirim absensi.'};
+      } catch (_) {
+        return {'success': false, 'message': 'Gagal mengirim absensi (Status: ${response.statusCode})'};
+      }
+    } catch (e) {
+      return {'success': false, 'message': 'Kesalahan jaringan: $e'};
+    }
+  }
+
+  // =========================================================================
+  // 🔥 MENGAMBIL RIWAYAT ABSENSI TERAPIS
+  // =========================================================================
+  Future<Map<String, dynamic>> getAttendanceHistory({String? bulan, String? tahun}) async {
+    final String? token = await _getToken();
+    if (token == null) return {'success': false, 'message': 'Token tidak ditemukan'};
+
+    final Map<String, String> queryParams = {};
+    if (bulan != null && bulan.isNotEmpty) queryParams['bulan'] = bulan;
+    if (tahun != null && tahun.isNotEmpty) queryParams['tahun'] = tahun;
+
+    final uri = Uri.parse('$baseUrl/api_terapis/get_history_absensi.php')
+        .replace(queryParameters: queryParams.isNotEmpty ? queryParams : null);
+
+    try {
+      final response = await http.get(
+        uri,
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json',
+          'Authorization': 'Bearer $token',
+        },
+      );
+
+      _logDebug(url: uri.toString(), method: "GET", statusCode: response.statusCode, responseBody: response.body);
+
+      if (response.statusCode == 200) {
+        return json.decode(response.body);
+      } else if (response.statusCode == 401) {
+        await logout();
+        return {'success': false, 'message': 'Sesi habis, silakan login lagi.'};
+      }
+
+      try {
+        final errorData = json.decode(response.body);
+        return {'success': false, 'message': errorData['message'] ?? 'Gagal mengambil riwayat absensi.'};
+      } catch (_) {
+        return {'success': false, 'message': 'Gagal mengambil riwayat absensi (Status: ${response.statusCode})'};
+      }
+    } catch (e) {
+      return {'success': false, 'message': 'Kesalahan jaringan: $e'};
+    }
+  }
+
 }

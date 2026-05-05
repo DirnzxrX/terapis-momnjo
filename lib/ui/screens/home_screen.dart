@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:async'; 
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart'; 
 import 'package:shared_preferences/shared_preferences.dart';
@@ -23,14 +24,46 @@ class _HomeScreenState extends State<HomeScreen> {
   // STATE STATUS KERJA
   bool _isOnDuty = false; 
 
-  // STATE NOTIFIKAASI
+  // STATE NOTIFIKASI
   bool _hasNewNotification = false;
   List<Map<String, String>> _notifications = [];
+
+  // --- STATE CAROUSEL ---
+  List<String> _carouselImages = [];
+  // Mulai dari indeks yang besar agar bisa langsung digeser ke kiri (infinite loop)
+  int _currentCarouselIndex = 10000; 
+  late PageController _pageController;
+  Timer? _carouselTimer;
 
   @override
   void initState() {
     super.initState();
+    // viewportFraction 0.95 membuat sedikit bagian gambar selanjutnya terlihat
+    _pageController = PageController(initialPage: _currentCarouselIndex, viewportFraction: 0.95);
     _loadData();
+  }
+
+  @override
+  void dispose() {
+    _carouselTimer?.cancel();
+    _pageController.dispose();
+    super.dispose();
+  }
+
+  void _startCarouselTimer() {
+    _carouselTimer?.cancel();
+    // Hanya jalankan auto-play jika gambar lebih dari 1
+    if (_carouselImages.length > 1) {
+      _carouselTimer = Timer.periodic(const Duration(seconds: 4), (timer) {
+        if (_pageController.hasClients) {
+          // Infinite loop: cukup selalu pindah ke halaman berikutnya
+          _pageController.nextPage(
+            duration: const Duration(milliseconds: 500),
+            curve: Curves.fastOutSlowIn,
+          );
+        }
+      });
+    }
   }
 
   // --- FUNGSI LOAD DATA DARI LOKAL & API ---
@@ -41,7 +74,6 @@ class _HomeScreenState extends State<HomeScreen> {
     try {
       final prefs = await SharedPreferences.getInstance();
       
-      // Mengambil data dari cache lokal
       String? namaSimpanan = prefs.getString('nama_lengkap') ?? prefs.getString('fullname');
       String? usernameSimpanan = prefs.getString('username');
       String? fotoSimpanan = prefs.getString('foto'); 
@@ -56,13 +88,14 @@ class _HomeScreenState extends State<HomeScreen> {
       }
       
       final api = ApiService();
-      
-      // Mengambil tanggal hari ini untuk filter data
       final String todayStr = DateFormat('yyyy-MM-dd').format(DateTime.now());
       int todayJobsCount = 0;
       int todayHistoryCount = 0;
 
-      // 1. FETCH JOBS (Tugas Aktif)
+      // FETCH CAROUSEL
+      _fetchCarousel(api);
+
+      // 1. FETCH JOBS
       final jobsResponse = await api.getActiveJobs(); 
       Map<String, dynamic>? nextBook;
       List<Map<String, String>> newNotifs = [];
@@ -76,7 +109,6 @@ class _HomeScreenState extends State<HomeScreen> {
           final String status = (job['status'] ?? job['booking_status'] ?? '').toString().toLowerCase().trim();
           final String startTime = job['start_time']?.toString() ?? '';
           
-          // Hitung booking hari ini (tugas yang masih aktif)
           if (startTime.startsWith(todayStr)) {
             todayJobsCount++;
           }
@@ -95,7 +127,6 @@ class _HomeScreenState extends State<HomeScreen> {
 
           nextBook = openJobs.first; 
           
-          // SIMULASI NOTIFIKASI TUGAS BARU 
           final namaKlien = nextBook?['customer_name'] ?? 'Klien';
           final deskripsi = nextBook?['treatment_summary'] ?? 'Treatment';
           final rawJam = nextBook?['start_time']?.toString() ?? '--:--';
@@ -109,13 +140,12 @@ class _HomeScreenState extends State<HomeScreen> {
         }
       }
 
-      // 2. FETCH HISTORY (Riwayat Selesai)
+      // 2. FETCH HISTORY
       final historyResponse = await api.getHistoryList();
       if (historyResponse['status'] == 'success' || historyResponse['success'] == true) {
          List historyList = historyResponse['data'] ?? [];
          for(var item in historyList) {
             String tgl = item['start_time'] ?? item['jadwal'] ?? item['date'] ?? '';
-            // Hitung tugas yang sudah selesai hari ini
             if (tgl.startsWith(todayStr)) {
                todayHistoryCount++;
             }
@@ -140,41 +170,87 @@ class _HomeScreenState extends State<HomeScreen> {
             fotoSimpanan = "https://app.momnjo.com/assets/images/${data['avatar']}";
           }
         }
-      } catch (e) {
-        debugPrint("Gagal load profil di HomeScreen: $e");
-      }
+      } catch (e) {}
 
       if (mounted) {
         setState(() {
           _namaTerapis = namaTampil;
           _fotoProfile = fotoSimpanan ?? '';
           _isOnDuty = isOnDutySimpanan; 
-          
-          // 🔥 PERBAIKAN LOGIKA: 
-          // Total Booking = (Aktif Hari Ini) + (Selesai Hari Ini)
           _bookingHariIni = todayJobsCount + todayHistoryCount;
           _selesai = todayHistoryCount; 
-          
           _nextBooking = nextBook;
           _notifications = newNotifs;
           _hasNewNotification = hasNewNotif;
           _isLoading = false;
         });
-        
-        debugPrint("📊 [STATISTIK HARI INI] Active: $todayJobsCount | Selesai: $todayHistoryCount | Total: $_bookingHariIni");
       }
     } catch (e) {
-      debugPrint("Error load data: $e");
       if (mounted) setState(() => _isLoading = false);
     }
   }
 
-  // 🔥 FUNGSI UNTUK MENGUBAH STATUS KERJA
+  // --- FUNGSI AMBIL CAROUSEL DARI API (SUPER AGRESIF) ---
+  Future<void> _fetchCarousel(ApiService api) async {
+    try {
+      final response = await api.getCarousel();
+      if ((response['status'] == 'success' || response['success'] == true) && response['data'] != null) {
+        
+        dynamic responseData = response['data'];
+        List dataList = [];
+        
+        if (responseData is List) {
+          dataList = responseData;
+        } else if (responseData is Map) {
+          dataList = responseData.values.toList();
+        }
+        
+        List<String> loadedImages = [];
+        
+        for (var item in dataList) {
+          if (item is String) {
+            loadedImages.add(item);
+          } else if (item is Map) {
+            String? url = item['image'] ?? item['image_url'] ?? item['banner'] ?? item['file'] ?? item['url'] ?? item['foto'] ?? item['gambar'] ?? item['path'];
+            
+            // 🔥 SAPU BERSIH: Cari value apapun yang bentuknya seperti file gambar jika key standar gagal
+            if (url == null || url.trim().isEmpty) {
+              for (var val in item.values) {
+                if (val is String) {
+                  String v = val.toLowerCase();
+                  if (v.contains('.jpg') || v.contains('.jpeg') || v.contains('.png') || v.contains('.webp')) {
+                    url = val;
+                    break;
+                  }
+                }
+              }
+            }
+
+            if (url != null && url.trim().isNotEmpty) {
+              if (!url.startsWith('http')) {
+                url = 'https://app.momnjo.com/$url'.replaceAll('//assets', '/assets'); 
+              }
+              loadedImages.add(url);
+            }
+          }
+        }
+
+        if (mounted && loadedImages.isNotEmpty) {
+          setState(() {
+            _carouselImages = loadedImages;
+          });
+          _startCarouselTimer();
+        }
+      }
+    } catch (e) {
+      debugPrint("Error fetching carousel: $e");
+    }
+  }
+
   Future<void> _toggleDutyStatus(bool value) async {
     setState(() {
       _isOnDuty = value;
     });
-    
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool('is_on_duty', value);
   }
@@ -284,7 +360,6 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  // --- DEFINISI WARNA DESAIN BARU ---
   final Color textDarkBrown = const Color(0xFF4A332B);
   final Color primaryPeach = const Color(0xFFECA898);
   final Color goldBrown = const Color(0xFFB08D57);
@@ -316,7 +391,6 @@ class _HomeScreenState extends State<HomeScreen> {
                   _buildStatusCard(),
                   const SizedBox(height: 24),
                   
-                  // RINGKASAN HARI INI
                   Text(
                     'Ringkasan Hari Ini',
                     style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: textDarkBrown),
@@ -325,7 +399,6 @@ class _HomeScreenState extends State<HomeScreen> {
                   _buildSummarySection(),
                   const SizedBox(height: 24),
                   
-                  // TUGAS BERIKUTNYA
                   Text(
                     'Tugas Berikutnya',
                     style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: textDarkBrown),
@@ -336,7 +409,6 @@ class _HomeScreenState extends State<HomeScreen> {
                   else if (_nextBooking != null)
                     _buildNextBookingCard(context)
                   else
-                    // Muncul jika di jadwal memang tidak ada tugas aktif
                     Container(
                       width: double.infinity,
                       padding: const EdgeInsets.symmetric(vertical: 24, horizontal: 20),
@@ -359,42 +431,117 @@ class _HomeScreenState extends State<HomeScreen> {
                     ),
                   const SizedBox(height: 24),
                   
-                  // BANNER GAMBAR PENGGANTI AKSI CEPAT
-                  ClipRRect(
-                    borderRadius: BorderRadius.circular(16),
-                    child: Image.asset(
-                      'assets/gambar1.jpeg', 
-                      width: double.infinity,
-                      height: 220,
-                      fit: BoxFit.cover,
-                      errorBuilder: (context, error, stackTrace) {
-                        return Container(
-                          width: double.infinity,
-                          height: 220,
-                          decoration: BoxDecoration(
-                            color: Colors.grey.shade200,
-                            borderRadius: BorderRadius.circular(16)
-                          ),
-                          child: Column(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            children: [
-                              Icon(Icons.image_outlined, size: 40, color: Colors.grey.shade400),
-                              const SizedBox(height: 8),
-                              Text('Siapkan gambar di assets/gambar1.jpeg', 
-                                style: TextStyle(color: Colors.grey.shade500, fontSize: 12)
-                              ),
-                            ],
-                          ),
-                        );
-                      }
-                    ),
-                  ),
+                  // BANNER CAROUSEL API
+                  _buildCarouselSection(),
                   const SizedBox(height: 30),
                 ],
               ),
             ),
           ),
         ),
+      ),
+    );
+  }
+
+  // 🔥 WIDGET: CAROUSEL BANNER INFINITE LOOP
+  Widget _buildCarouselSection() {
+    if (_carouselImages.isEmpty) {
+      return ClipRRect(
+        borderRadius: BorderRadius.circular(16),
+        child: Image.asset(
+          'assets/gambar1.jpeg', 
+          width: double.infinity,
+          height: 220,
+          fit: BoxFit.cover,
+          errorBuilder: (context, error, stackTrace) => _buildFallbackShimmer()
+        ),
+      );
+    }
+
+    // Mendapatkan indeks aktif sebenarnya (0, 1, 2, dst) untuk animasi dots
+    int activeDotIndex = _currentCarouselIndex % _carouselImages.length;
+
+    return Column(
+      children: [
+        SizedBox(
+          height: 220,
+          width: double.infinity,
+          child: PageView.builder(
+            controller: _pageController,
+            physics: const BouncingScrollPhysics(parent: PageScrollPhysics()),
+            // 🔥 ITEM COUNT DIHILANGKAN agar bisa Infinite Loop
+            onPageChanged: (index) {
+              setState(() {
+                _currentCarouselIndex = index;
+              });
+              if (_carouselImages.length > 1) {
+                _startCarouselTimer();
+              }
+            },
+            itemBuilder: (context, index) {
+              // 🔥 RUMUS SISA BAGI: memastikan index tidak pernah melebihi jumlah gambar
+              int actualImageIndex = index % _carouselImages.length;
+              
+              return Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 6.0),
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(16),
+                  child: Image.network(
+                    _carouselImages[actualImageIndex],
+                    fit: BoxFit.cover,
+                    loadingBuilder: (context, child, loadingProgress) {
+                      if (loadingProgress == null) return child;
+                      return _buildFallbackShimmer();
+                    },
+                    errorBuilder: (context, error, stackTrace) {
+                      return _buildFallbackShimmer();
+                    },
+                  ),
+                ),
+              );
+            },
+          ),
+        ),
+        const SizedBox(height: 12),
+        // DOTS INDICATOR
+        if (_carouselImages.length > 1)
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: List.generate(
+              _carouselImages.length,
+              (index) => AnimatedContainer(
+                duration: const Duration(milliseconds: 300),
+                margin: const EdgeInsets.symmetric(horizontal: 4),
+                width: activeDotIndex == index ? 24 : 8,
+                height: 8,
+                decoration: BoxDecoration(
+                  color: activeDotIndex == index ? primaryPeach : Colors.grey.shade300,
+                  borderRadius: BorderRadius.circular(4),
+                ),
+              ),
+            ),
+          ),
+      ],
+    );
+  }
+
+  Widget _buildFallbackShimmer() {
+    return Container(
+      width: double.infinity,
+      height: 220,
+      decoration: BoxDecoration(
+        color: Colors.grey.shade200,
+        borderRadius: BorderRadius.circular(16)
+      ),
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(Icons.image_outlined, size: 40, color: Colors.grey.shade400),
+          const SizedBox(height: 8),
+          Text('Memuat Promosi...', 
+            style: TextStyle(color: Colors.grey.shade500, fontSize: 12)
+          ),
+        ],
       ),
     );
   }
@@ -461,7 +608,6 @@ class _HomeScreenState extends State<HomeScreen> {
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          // KIRI: Label Status Kerja, Tombol Pill ON/OFF DUTY, dan Jam
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -471,7 +617,6 @@ class _HomeScreenState extends State<HomeScreen> {
                 Row(
                   crossAxisAlignment: CrossAxisAlignment.center,
                   children: [
-                    // Tombol Kapsul (Pill) untuk mengganti status
                     GestureDetector(
                       onTap: () => _toggleDutyStatus(!_isOnDuty),
                       child: Container(
@@ -492,7 +637,6 @@ class _HomeScreenState extends State<HomeScreen> {
                       ),
                     ),
                     const SizedBox(width: 14),
-                    // Jam Kerja (Besar dan Tebal)
                     Text('08.00 - 17.00', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w900, color: textDarkBrown)),
                   ],
                 ),
@@ -500,7 +644,6 @@ class _HomeScreenState extends State<HomeScreen> {
             ),
           ),
           
-          // KANAN: Tombol Absensi & Chat Admin
           Row(
             children: [
               GestureDetector(
@@ -645,14 +788,11 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
           ElevatedButton(
             onPressed: () {
-              // 🔴 LOGIKA PENGECEKAN BARU: Apakah ini Home Service atau Onsite?
               String roomTypeStr = (_nextBooking?['room_type'] ?? _nextBooking?['type'] ?? _nextBooking?['kategori'] ?? '').toString().toLowerCase();
               bool isHomeService = roomTypeStr.contains('home') || roomTypeStr.contains('kunjungan') || roomTypeStr.isEmpty;
               
-              // Tentukan route-nya
               String targetRoute = isHomeService ? '/booking_detail' : '/booking_detail_onsite';
 
-              // Buka halaman yang sesuai
               Navigator.pushNamed(context, targetRoute, arguments: _nextBooking).then((_) {
                 _loadData();
               });

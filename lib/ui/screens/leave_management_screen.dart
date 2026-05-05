@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:convert';
+import 'package:therapist_momnjo/data/api_service.dart'; // Pastikan import ApiService ada
 
 class LeaveManagementScreen extends StatefulWidget {
   const LeaveManagementScreen({Key? key}) : super(key: key);
@@ -19,6 +20,7 @@ class _LeaveManagementScreenState extends State<LeaveManagementScreen> {
   bool _isOnDuty = false; 
   double _dragValue = 0.0; 
   bool _isDragging = false;
+  bool _isSubmitting = false; // Mencegah spam API saat sedang loading
 
   // Variabel untuk menyimpan nama user yang login
   String _therapistName = 'Memuat...';
@@ -26,7 +28,6 @@ class _LeaveManagementScreenState extends State<LeaveManagementScreen> {
   DateTime? _filterStartDate;
   DateTime? _filterEndDate;
 
-  // Data dummy telah dihapus, list diinisialisasi kosong
   List<Map<String, dynamic>> _attendanceHistory = [];
 
   @override
@@ -41,9 +42,9 @@ class _LeaveManagementScreenState extends State<LeaveManagementScreen> {
     if (!mounted) return;
     
     // 1. Load Nama Terapis yang Login (Pastikan diset saat halaman Login)
-    String? savedName = prefs.getString('user_name');
+    String? savedName = prefs.getString('user_name') ?? prefs.getString('nama_lengkap');
     
-    // 2. Load Riwayat Absensi
+    // 2. Load Riwayat Absensi Lokal
     final String? savedHistory = prefs.getString('attendance_history');
     if (savedHistory != null) {
       try {
@@ -95,41 +96,72 @@ class _LeaveManagementScreenState extends State<LeaveManagementScreen> {
     return null;
   }
 
+  // 🔥 PERBAIKAN: MENGIRIM DATA ABSENSI KE SERVER API ADMIN
   Future<void> _handleDutyToggle(bool newDutyStatus) async {
-    if (_isOnDuty == newDutyStatus) return; 
-
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setBool('is_on_duty', newDutyStatus);
+    if (_isOnDuty == newDutyStatus || _isSubmitting) {
+      // Jika statusnya sama, atau sedang dalam proses tembak API, abaikan.
+      setState(() => _dragValue = _isOnDuty ? 1.0 : 0.0);
+      return; 
+    }
 
     setState(() {
-      _isOnDuty = newDutyStatus;
-      _dragValue = _isOnDuty ? 1.0 : 0.0;
-
-      final currentTime = _getCurrentTime();
-      final currentDate = _getCurrentDateStr();
-
-      if (_isOnDuty) {
-        _attendanceHistory.insert(0, {
-          'type': 'Catatan Harian',
-          'date': currentDate,
-          'in': currentTime,
-          'out': '--', 
-          'status': 'Hadir',
-          'reason': null,
-        });
-        _showInfoMessage('Berhasil Absen Masuk (On Duty) pada $currentTime');
-      } else {
-        for (var record in _attendanceHistory) {
-          if (record['out'] == '--') {
-            record['out'] = currentTime; 
-            break; 
-          }
-        }
-        _showInfoMessage('Berhasil Absen Keluar (Off Duty) pada $currentTime');
-      }
+      _isSubmitting = true;
     });
 
-    await _saveAttendanceHistory();
+    _showInfoMessage('Memproses absensi ke server...');
+
+    // 1. Tentukan jenis aksi
+    String action = newDutyStatus ? 'check_in' : 'check_out';
+
+    // 2. Tembak API Backend
+    final apiResult = await ApiService().submitAttendance(action: action);
+
+    // 3. Evaluasi hasil dari backend
+    if (apiResult['success'] == true || apiResult['status'] == 'success') {
+      
+      // Jika Backend berhasil mencatat, baru update di Lokal HP
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setBool('is_on_duty', newDutyStatus);
+
+      setState(() {
+        _isOnDuty = newDutyStatus;
+        _dragValue = _isOnDuty ? 1.0 : 0.0;
+        _isSubmitting = false;
+
+        final currentTime = _getCurrentTime();
+        final currentDate = _getCurrentDateStr();
+
+        if (_isOnDuty) {
+          _attendanceHistory.insert(0, {
+            'type': 'Catatan Harian',
+            'date': currentDate,
+            'in': currentTime,
+            'out': '--', 
+            'status': 'Hadir',
+            'reason': null,
+          });
+          _showInfoMessage('Berhasil Absen Masuk (On Duty)');
+        } else {
+          for (var record in _attendanceHistory) {
+            if (record['out'] == '--') {
+              record['out'] = currentTime; 
+              break; 
+            }
+          }
+          _showInfoMessage('Berhasil Absen Keluar (Off Duty)');
+        }
+      });
+
+      await _saveAttendanceHistory();
+
+    } else {
+      // Jika Backend Gagal / Ditolak (misal di luar jam kerja, atau server error)
+      setState(() {
+        _isSubmitting = false;
+        _dragValue = _isOnDuty ? 1.0 : 0.0; // Kembalikan posisi slider ke semula
+      });
+      _showInfoMessage(apiResult['message'] ?? 'Gagal absensi ke server.', isError: true);
+    }
   }
 
   void _showInfoMessage(String message, {bool isError = false}) {
@@ -286,6 +318,7 @@ class _LeaveManagementScreenState extends State<LeaveManagementScreen> {
                   },
                   onHorizontalDragStart: (_) => setState(() => _isDragging = true),
                   onHorizontalDragUpdate: (details) {
+                    if (_isSubmitting) return; // Kunci jika sedang proses API
                     setState(() {
                       double currentLeft = (_dragValue * maxDrag) + details.delta.dx;
                       _dragValue = (currentLeft / maxDrag).clamp(0.0, 1.0);
@@ -295,7 +328,10 @@ class _LeaveManagementScreenState extends State<LeaveManagementScreen> {
                     setState(() {
                       _isDragging = false;
                     });
-                    _handleDutyToggle(_dragValue > 0.5);
+                    
+                    // Pastikan ditarik sampai lebih dari 50%
+                    bool shouldBeOnDuty = _dragValue > 0.5;
+                    _handleDutyToggle(shouldBeOnDuty);
                   },
                   child: Container(
                     width: double.infinity, height: 54,
@@ -308,12 +344,20 @@ class _LeaveManagementScreenState extends State<LeaveManagementScreen> {
                         AnimatedPositioned(
                           duration: Duration(milliseconds: _isDragging ? 0 : 250), curve: Curves.easeInOut,
                           left: leftPos, top: 8, bottom: 8,
-                          child: Container(width: thumbWidth, decoration: const BoxDecoration(shape: BoxShape.circle, color: Colors.white)),
+                          child: Container(
+                            width: thumbWidth, 
+                            decoration: const BoxDecoration(shape: BoxShape.circle, color: Colors.white),
+                            child: _isSubmitting 
+                              ? const Padding(
+                                  padding: EdgeInsets.all(8.0), 
+                                  child: CircularProgressIndicator(strokeWidth: 2)
+                                ) 
+                              : null,
+                          ),
                         ),
                         Center(
                           child: Text(
-                            // Diterjemahkan agar lebih jelas
-                            _isOnDuty ? 'Geser untuk Absen Keluar' : 'Geser untuk Absen Masuk',
+                            _isSubmitting ? 'Memproses...' : (_isOnDuty ? 'Geser untuk Absen Keluar' : 'Geser untuk Absen Masuk'),
                             style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: 14),
                           ),
                         ),

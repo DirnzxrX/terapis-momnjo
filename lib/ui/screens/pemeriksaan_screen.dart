@@ -65,12 +65,9 @@ class _PemeriksaanScreenState extends State<PemeriksaanScreen> {
 
     final args = widget.bookingData ?? ModalRoute.of(context)?.settings.arguments as Map<String, dynamic>?;
     
-    // Log untuk pengecekan di terminal
     debugPrint("DEBUG: Data yang diterima di Pemeriksaan: $args");
 
     String idTransaksi = (args?['id_transaksi'] ?? args?['id_booking'] ?? '').toString();
-    
-    // --- MENGAMBIL ID CUSTOMER DARI API ---
     String idCustomer = (args?['id_customer'] ?? '').toString();
 
     if (idTransaksi.isEmpty || idTransaksi == 'null') {
@@ -92,7 +89,7 @@ class _PemeriksaanScreenState extends State<PemeriksaanScreen> {
     try {
       final result = await ApiService().storeDataMedis(
         idTransaksi: idTransaksi,
-        idCustomer: idCustomer, // Menggunakan ID asli dari Backend
+        idCustomer: idCustomer,
         suhu: suhu, 
         tinggi: tinggi, 
         berat: berat,
@@ -107,12 +104,23 @@ class _PemeriksaanScreenState extends State<PemeriksaanScreen> {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: const Text('Data pemeriksaan berhasil disimpan!'), backgroundColor: buttonColor)
         );
-        // 🔴 UPDATE: Kirim nilai 'success' ke halaman Detail Booking
         Navigator.pop(context, 'success'); 
       } else {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(result['message'] ?? 'Gagal menyimpan'), backgroundColor: Colors.redAccent)
-        );
+        // Jika Server bilang data sudah ada, kita ANGGAP SUKSES saja.
+        String errorMsg = (result['message'] ?? '').toString().toLowerCase();
+        
+        if (errorMsg.contains('sudah merekam') || errorMsg.contains('sudah ada') || errorMsg.contains('already')) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Data medis sudah tercatat sebelumnya. Melanjutkan sesi...'), backgroundColor: Colors.green)
+          );
+          // Tetap tutup halaman dan lanjut ke treatment
+          Navigator.pop(context, 'success');
+        } else {
+          // Tampilkan error merah hanya jika masalahnya hal lain
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text(result['message'] ?? 'Gagal menyimpan'), backgroundColor: Colors.redAccent)
+          );
+        }
       }
     } catch (e) {
       if (mounted) {
@@ -127,7 +135,6 @@ class _PemeriksaanScreenState extends State<PemeriksaanScreen> {
 
   @override
   Widget build(BuildContext context) {
-    // Tangkap arguments untuk nampilin nama Klien di UI
     final args = widget.bookingData ?? ModalRoute.of(context)?.settings.arguments as Map<String, dynamic>?;
     final String namaKlien = (args?['customer_name'] ?? args?['customer_fullname'] ?? 'Klien').toString();
 
@@ -155,8 +162,8 @@ class _PemeriksaanScreenState extends State<PemeriksaanScreen> {
                         child: Row(
                           children: [
                             GestureDetector(
-                              // 🔴 UPDATE: Jika tombol Back panah ditekan, kirim 'back'
-                              onTap: () => Navigator.pop(context, 'back'), 
+                              // Mengembalikan false saat di-back agar tidak otomatis terbaca "berhasil"
+                              onTap: () => Navigator.pop(context, false), 
                               child: Icon(Icons.arrow_back_ios_new, color: textDark, size: 20)
                             ),
                             const SizedBox(width: 16),
@@ -165,7 +172,6 @@ class _PemeriksaanScreenState extends State<PemeriksaanScreen> {
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
                                   Text('Pemeriksaan', style: TextStyle(fontSize: 24, fontWeight: FontWeight.w800, color: textDark)),
-                                  // Tambahan UI biar terapis tau ini lagi meriksa siapa
                                   Text('Klien: $namaKlien', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: textDark.withOpacity(0.6))),
                                 ],
                               ),
@@ -195,40 +201,20 @@ class _PemeriksaanScreenState extends State<PemeriksaanScreen> {
         bottomNavigationBar: Container(
           color: bgInner,
           padding: EdgeInsets.fromLTRB(20, 10, 20, MediaQuery.of(context).padding.bottom + 20),
-          child: Row(
-            children: [
-              // TOMBOL SIMPAN (KIRI)
-              Expanded(
-                flex: 2,
-                child: ElevatedButton(
-                  onPressed: _isLoading ? null : _submitData,
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: buttonColor, 
-                    padding: const EdgeInsets.symmetric(vertical: 16), 
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)), 
-                    elevation: 0
-                  ),
-                  child: _isLoading 
-                      ? const SizedBox(height: 24, width: 24, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 3))
-                      : const Text('Simpan', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.white)),
-                ),
+          child: SizedBox(
+            width: double.infinity, // Membuat tombol Simpan memenuhi lebar
+            child: ElevatedButton(
+              onPressed: _isLoading ? null : _submitData,
+              style: ElevatedButton.styleFrom(
+                backgroundColor: buttonColor, 
+                padding: const EdgeInsets.symmetric(vertical: 16), 
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)), 
+                elevation: 0
               ),
-              const SizedBox(width: 12),
-              // TOMBOL SKIP (KANAN)
-              Expanded(
-                flex: 1,
-                child: OutlinedButton(
-                  // 🔴 UPDATE: Jika tombol Skip ditekan, kirim nilai string 'skipped'
-                  onPressed: _isLoading ? null : () => Navigator.pop(context, 'skipped'),
-                  style: OutlinedButton.styleFrom(
-                    side: BorderSide(color: buttonColor, width: 2), 
-                    padding: const EdgeInsets.symmetric(vertical: 16), 
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30))
-                  ),
-                  child: Text('Skip', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: buttonColor)),
-                ),
-              ),
-            ],
+              child: _isLoading 
+                  ? const SizedBox(height: 24, width: 24, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 3))
+                  : const Text('Simpan Data Pemeriksaan', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.white)),
+            ),
           ),
         ),
       ),

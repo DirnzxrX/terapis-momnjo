@@ -19,10 +19,7 @@ class _DetailBookingOnsiteScreenState extends State<DetailBookingOnsiteScreen> {
   bool _isInitialized = false;
   bool _isUpdatingStatus = false; 
   
-  // STATE: Untuk menyimpan "titipan" data dari layar Active Job
   Map<String, dynamic>? _savedActiveJobState; 
-
-  // 🔴 STATE BARU: Untuk melacak apakah pemeriksaan di-skip
   bool _isPemeriksaanSkipped = false;
 
   @override
@@ -39,6 +36,16 @@ class _DetailBookingOnsiteScreenState extends State<DetailBookingOnsiteScreen> {
           passedStatus = 'Accepted';
         }
         _currentStatus = passedStatus;
+
+        // Inisialisasi status skip dari data API (jika ada)
+        var pemDone = args['is_pemeriksaan_done'] ?? args['pemeriksaan_selesai'];
+        bool isSkipped = args['is_skipped'] == true || args['skipped'] == true || args['pemeriksaan_skipped'] == true;
+        
+        if ((pemDone == true || pemDone == 'true' || pemDone == 1 || pemDone == '1') && !isSkipped) {
+           _isPemeriksaanSkipped = false;
+        } else if (isSkipped) {
+           _isPemeriksaanSkipped = true;
+        }
       } else {
         _currentStatus = 'Accepted';
       }
@@ -46,7 +53,6 @@ class _DetailBookingOnsiteScreenState extends State<DetailBookingOnsiteScreen> {
     }
   }
 
-  // --- FUNGSI UPDATE STATUS KE BACKEND ---
   Future<void> _updateStatusAPI(String newStatus) async {
     final String bookingId = _data?['id_booking']?.toString() ?? '';
     if (bookingId.isEmpty) {
@@ -89,7 +95,9 @@ class _DetailBookingOnsiteScreenState extends State<DetailBookingOnsiteScreen> {
       '/active_job',
       arguments: {
         ...?_data,
-        'savedState': _savedActiveJobState, 
+        'savedState': _savedActiveJobState,
+        'pemeriksaan_skipped': _isPemeriksaanSkipped,
+        'booking_status': _currentStatus
       },
     );
 
@@ -97,9 +105,14 @@ class _DetailBookingOnsiteScreenState extends State<DetailBookingOnsiteScreen> {
       final Map<String, dynamic> resultMap = Map<String, dynamic>.from(result);
 
       if (resultMap['action'] == 'finish_treatment') {
-        await _updateStatusAPI('Closed');
         setState(() {
-          _currentStatus = 'Completed'; 
+          // 🔥 UPDATE: Jika pemeriksaan sudah beres di layar Job Aktif, ubah status skip jadi false (Centang Hijau)
+          if (resultMap['isPemeriksaanSelesai'] == true) {
+             _isPemeriksaanSkipped = false; 
+          }
+          
+          _currentStatus = 'Closed'; 
+          _data?['booking_status'] = 'Closed';
           _data?['durasi_aktual'] = resultMap['durasi_aktual'];
           _savedActiveJobState = {
             'secondsElapsed': resultMap['durasi_aktual'],
@@ -110,6 +123,10 @@ class _DetailBookingOnsiteScreenState extends State<DetailBookingOnsiteScreen> {
         });
       } else if (resultMap['action'] == 'save_state') {
         setState(() {
+          // 🔥 UPDATE: Jika user melakukan Resume dan mengisi form lalu back (Pause), hilangkan silang merahnya
+          if (resultMap['isPemeriksaanSelesai'] == true) {
+             _isPemeriksaanSkipped = false; 
+          }
           _currentStatus = 'Started';
           _savedActiveJobState = resultMap;
         });
@@ -132,65 +149,85 @@ class _DetailBookingOnsiteScreenState extends State<DetailBookingOnsiteScreen> {
       layananList = _data?['treatments'] ?? _data?['services'] ?? [];
     }
 
-    return Scaffold(
-      backgroundColor: const Color(0xFFFAFAFA),
-      appBar: AppBar(
-        backgroundColor: Colors.white, 
-        elevation: 1,
-        shadowColor: Colors.black.withOpacity(0.1),
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back, color: Colors.black87),
-          onPressed: () async {
-            if (_currentStatus.toLowerCase() == 'started') {
-              await _openActiveJob();
-            } else {
-              Navigator.pop(context);
-            }
-          },
+    return PopScope(
+      canPop: false, 
+      onPopInvoked: (didPop) {
+        if (didPop) return;
+        Navigator.pop(context, true); 
+      },
+      child: Scaffold(
+        backgroundColor: const Color(0xFFFAFAFA),
+        appBar: AppBar(
+          backgroundColor: Colors.white, 
+          elevation: 1,
+          shadowColor: Colors.black.withOpacity(0.1),
+          leading: IconButton(
+            icon: const Icon(Icons.arrow_back, color: Colors.black87),
+            onPressed: () {
+              Navigator.pop(context, true); 
+            },
+          ),
+          title: const Text('Detail Booking (Onsite)', style: TextStyle(color: Colors.black87, fontSize: 18, fontWeight: FontWeight.bold)),
+          centerTitle: true,
         ),
-        title: const Text('Detail Booking (Onsite)', style: TextStyle(color: Colors.black87, fontSize: 18, fontWeight: FontWeight.bold)),
-        centerTitle: true,
-      ),
-      body: Column(
-        children: [
-          Expanded(
-            child: SingleChildScrollView(
-              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  _buildProfileCard(nama, telepon, _currentStatus), 
-                  const SizedBox(height: 16),
-                  _buildLocationCard(gerai, roomType),
-                  const SizedBox(height: 16),
-                  _buildServiceCard(layananList, startTime), 
-                  const SizedBox(height: 16),
-                  _buildNotesCard(),
-                  const SizedBox(height: 24),
-                  const Text('Timeline Status', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.black87)),
-                  const SizedBox(height: 16),
-                  _buildTimeline(_currentStatus),
-                  const SizedBox(height: 40),
-                ],
+        body: Column(
+          children: [
+            Expanded(
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    _buildProfileCard(nama, telepon, _currentStatus), 
+                    const SizedBox(height: 16),
+                    _buildLocationCard(gerai, roomType),
+                    const SizedBox(height: 16),
+                    _buildServiceCard(layananList, startTime), 
+                    const SizedBox(height: 16),
+                    _buildNotesCard(),
+                    const SizedBox(height: 24),
+                    const Text('Timeline Status', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.black87)),
+                    const SizedBox(height: 16),
+                    _buildTimeline(_currentStatus),
+                    const SizedBox(height: 40),
+                  ],
+                ),
               ),
             ),
-          ),
-          _buildBottomButton(layananList),
-        ],
+            _buildBottomButton(layananList),
+          ],
+        ),
       ),
     );
   }
 
   Widget _buildProfileCard(String nama, String telepon, String status) {
     Color statusBg;
+    String statusIndo = status.toUpperCase();
+
     switch (status.toLowerCase()) {
       case 'new': 
       case 'open': 
-      case 'accepted': statusBg = const Color(0xFF9C27B0); break;
-      case 'pemeriksaan': statusBg = Colors.purple.shade400; break; 
-      case 'started': statusBg = Colors.indigo.shade400; break;
-      case 'completed': case 'closed': statusBg = Colors.green.shade500; break;
-      default: statusBg = Colors.grey;
+      case 'accepted': 
+        statusBg = const Color(0xFF9C27B0); 
+        statusIndo = 'DITERIMA';
+        break;
+      case 'pemeriksaan': 
+        statusBg = Colors.purple.shade400; 
+        statusIndo = 'PEMERIKSAAN';
+        break; 
+      case 'started': 
+        statusBg = Colors.indigo.shade400; 
+        statusIndo = 'DIMULAI';
+        break;
+      case 'completed': 
+      case 'closed': 
+        statusBg = Colors.green.shade500; 
+        statusIndo = 'SELESAI';
+        break;
+      default: 
+        statusBg = Colors.grey;
+        statusIndo = status.toUpperCase();
     }
 
     return Container(
@@ -210,7 +247,7 @@ class _DetailBookingOnsiteScreenState extends State<DetailBookingOnsiteScreen> {
                 padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
                 decoration: BoxDecoration(color: statusBg, borderRadius: BorderRadius.circular(20)),
                 child: Text(
-                  (status.toLowerCase() == 'new' || status.toLowerCase() == 'open') ? 'ACCEPTED' : status.toUpperCase(),
+                  statusIndo, 
                   style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 11),
                 ),
               ),
@@ -357,26 +394,24 @@ class _DetailBookingOnsiteScreenState extends State<DetailBookingOnsiteScreen> {
 
     return Column(
       children: [
-        _buildTimelineStep('Pekerjaan di Terima', isAssigned ? '' : 'Menunggu', isAssigned, false),
-        // 🔴 Update: Kirim status isSkipped ke step Pemeriksaan
-        _buildTimelineStep('Cek Kesehatan', isPemeriksaan ? (isPemeriksaan && _isPemeriksaanSkipped ? '' : 'Selesai') : '-', isPemeriksaan, false, isSkipped: _isPemeriksaanSkipped), 
+        _buildTimelineStep('Pekerjaan Diterima', isAssigned ? '' : 'Menunggu', isAssigned, false),
+        _buildTimelineStep('Cek Kesehatan', isPemeriksaan ? '' : '-', isPemeriksaan, false, isSkipped: _isPemeriksaanSkipped), 
         _buildTimelineStep('Mulai', isStarted ? '' : '-', isStarted, false),
-        _buildTimelineStep('Selesai', isCompleted ? '' : '-', isCompleted, true),
+        _buildTimelineStep('Selesai', isCompleted ? '' : '', isCompleted, true),
       ],
     );
   }
 
   Widget _buildTimelineStep(String label, String time, bool done, bool last, {bool isSkipped = false}) {
-    // 🔴 Logika pemilihan ikon dan warna
     IconData icon = Icons.radio_button_unchecked;
     Color color = Colors.grey;
 
     if (done) {
       if (isSkipped) {
-        icon = Icons.cancel; // Tanda silang (X)
+        icon = Icons.cancel; 
         color = Colors.red;
       } else {
-        icon = Icons.check_circle; // Tanda ceklis
+        icon = Icons.check_circle; 
         color = Colors.green;
       }
     }
@@ -407,7 +442,7 @@ class _DetailBookingOnsiteScreenState extends State<DetailBookingOnsiteScreen> {
   Widget _buildBottomButton(List<dynamic> layananList) {
     final s = _currentStatus.toLowerCase();
     String text = 'PANGGIL KLIEN (PEMERIKSAAN)';
-    if (s == 'accepted' || s == 'new' || s == 'open') text = 'PANGGIL KLIEN (PEMERIKSAAN)'; 
+    if (s == 'accepted' || s == 'new' || s == 'open') text = 'Cek Kesehatan'; 
     else if (s == 'pemeriksaan') text = 'MULAI SESI TREATMENT'; 
     else if (s == 'started') text = 'LANJUT TREATMENT';
     else if (s == 'completed' || s == 'closed') text = 'BUAT LAPORAN KUNJUNGAN';
@@ -422,11 +457,28 @@ class _DetailBookingOnsiteScreenState extends State<DetailBookingOnsiteScreen> {
         child: ElevatedButton(
           onPressed: _isUpdatingStatus ? null : () async {
             if (s == 'accepted' || s == 'new' || s == 'open') {
-              // 🔴 Menangkap hasil dari PemeriksaanScreen
               final result = await Navigator.push(context, MaterialPageRoute(builder: (context) => PemeriksaanScreen(bookingData: _data)));
               
+              if (result == null) return; 
+
               if (result == 'skipped') {
-                setState(() => _isPemeriksaanSkipped = true);
+                setState(() {
+                  _isPemeriksaanSkipped = true;
+                  _isUpdatingStatus = true;
+                });
+
+                final String idTransaksi = _data?['id_transaksi']?.toString() ?? '';
+                final String idCustomer = _data?['id_customer']?.toString() ?? _data?['customer_id']?.toString() ?? '';
+                
+                if (idTransaksi.isNotEmpty && idCustomer.isNotEmpty) {
+                  await ApiService().storeDataMedis(
+                    idTransaksi: idTransaksi,
+                    idCustomer: idCustomer,
+                    catatan: 'Pemeriksaan dilewati (Skipped) oleh Terapis',
+                  );
+                }
+
+                setState(() { _isUpdatingStatus = false; });
               } else {
                 setState(() => _isPemeriksaanSkipped = false);
               }
@@ -441,34 +493,12 @@ class _DetailBookingOnsiteScreenState extends State<DetailBookingOnsiteScreen> {
               await _openActiveJob();
             } 
             else if (s == 'completed' || s == 'closed') {
-              setState(() { _isUpdatingStatus = true; }); 
-              
-              final api = ApiService();
-              final String idTransaksi = _data?['id_transaksi']?.toString() ?? '';
-
-              // PASTIKAN SEMUA TREATMENT DI-FINISH (Sapu bersih jika status telanjur Closed tapi is_done masih false)
-              for (var item in layananList) {
-                bool alreadyDone = item is Map && item['is_done'] == true;
-                if (!alreadyDone) {
-                  String pName = '';
-                  if (item is Map) {
-                    pName = (item['product_name'] ?? item['name'] ?? '').toString().trim();
-                  } else {
-                    pName = item.toString().trim();
-                  }
-
-                  if (pName.isNotEmpty && idTransaksi.isNotEmpty) {
-                    await api.updateJobStatus(
-                      idTransaksi: idTransaksi,
-                      action: 'finish',
-                      productName: pName,
-                    );
-                  }
-                }
-              }
-              
-              setState(() { _isUpdatingStatus = false; });
-              if (mounted) Navigator.pushReplacementNamed(context, '/visit_report', arguments: _data);
+              Navigator.pushReplacementNamed(
+                context, 
+                '/visit_report', 
+                result: true, 
+                arguments: _data
+              );
             } 
           },
           style: ElevatedButton.styleFrom(

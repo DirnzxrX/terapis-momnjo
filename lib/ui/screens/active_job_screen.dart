@@ -12,11 +12,18 @@ class ActiveJobScreen extends StatefulWidget {
 class _ActiveJobScreenState extends State<ActiveJobScreen> {
   final Color primaryPink = const Color(0xFFF48FB1);
 
+  // --- CACHE SESI LOKAL ---
+  // Menyimpan state timer di memory sementara agar saat user kembali dari 
+  // Detail Booking (Lanjut Treatment), waktu tidak ter-reset.
+  static final Map<String, Map<String, dynamic>> _jobStateCache = {};
+
   Map<String, dynamic>? _bookingData;
   bool _isDataLoaded = false;
   bool _isApiLoading = false; 
 
-  String _idTransaksi = '';
+  String _idTransaksiAsli = '';
+  String _idBookingAsli = '';
+  String _idBerhasilDigunakan = ''; 
   String _productName = '';
 
   Timer? _timer;
@@ -26,8 +33,9 @@ class _ActiveJobScreenState extends State<ActiveJobScreen> {
   bool _hasStarted = false; 
   bool _isPaused = false; 
 
+  bool _allowPop = false; 
+
   List<dynamic> _treatments = [];
-  List<bool> _treatmentsDone = [];
 
   @override
   void didChangeDependencies() {
@@ -37,114 +45,227 @@ class _ActiveJobScreenState extends State<ActiveJobScreen> {
       if (args != null) {
         _bookingData = args;
         
-        _idTransaksi = args['id_transaksi']?.toString() ?? '';
+        _idTransaksiAsli = args['id_transaksi']?.toString() ?? args['transaksi_id']?.toString() ?? '';
+        _idBookingAsli = args['id_booking']?.toString() ?? '';
+        _idBerhasilDigunakan = _idTransaksiAsli.isNotEmpty ? _idTransaksiAsli : _idBookingAsli;
+
         _productName = args['product_name']?.toString() ?? '';
         
-        // 1. Ambil array treatments
         _treatments = args['treatments'] ?? args['services'] ?? [];
 
-        // 2. Jika kosong, buat treatment manual dari summary atau name
         if (_treatments.isEmpty) {
           String fallbackName = args['treatment_summary'] ?? args['treatment_name'] ?? _productName;
           if (fallbackName.isNotEmpty && fallbackName.toLowerCase() != 'treatment' && fallbackName.toLowerCase() != 'layanan') {
-            // Bersihkan string dari "(1x)" jika ada
-            fallbackName = fallbackName.replaceAll(RegExp(r'\(\d+x\)'), '').trim();
-            _treatments = [{'name': fallbackName, 'qty': 1, 'durasi': 60, 'is_done': false}];
+            var fallbackDur = args['duration'] ?? args['durasi'];
+            int parsedDur = _parseDuration(fallbackDur, fallbackName);
+            _treatments = [{'name': fallbackName.trim(), 'qty': 1, 'durasi': parsedDur}];
           }
         }
 
-        // --- LOGIKA AKUMULASI WAKTU ---
+        // --- HITUNG TOTAL DURASI DENGAN AKURAT ---
         if (_treatments.isNotEmpty) {
           int totalMenit = 0;
           for (var item in _treatments) {
-            int dur = 60;
+            int dur = 60; // Default jika gagal ambil data
             int qty = 1;
             if (item is Map) {
-              dur = int.tryParse(item['durasi']?.toString() ?? '60') ?? 60;
+              dur = _parseDuration(item['duration'] ?? item['durasi'], _getRobustTreatmentName(item));
               qty = int.tryParse(item['qty']?.toString() ?? '1') ?? 1;
             } else {
-              dur = _extractDurationFromProductName(item.toString()) ~/ 60;
+              dur = _parseDuration(null, item.toString());
             }
             totalMenit += (dur * qty);
           }
           _estimatedTotalSeconds = totalMenit * 60; 
         } else {
-          _estimatedTotalSeconds = _extractDurationFromProductName(_productName.isNotEmpty ? _productName : '60 min');
+          var rootDur = args['duration'] ?? args['durasi'];
+          _estimatedTotalSeconds = _parseDuration(rootDur, _productName.isNotEmpty ? _productName : '60 min') * 60;
         }
 
+        // 🔥 PERBAIKAN: Default Jangan Auto-Start! Harus pencet Mulai.
+        _hasStarted = false; 
+        _isPaused = false; 
+        _secondsElapsed = 0; 
+        
+        // --- 1. PULIHKAN WAKTU DARI ARGS LANGSUNG (Kembali pakai tombol back UI) ---
         if (args.containsKey('savedState') && args['savedState'] != null) {
           final saved = args['savedState'];
           _secondsElapsed = saved['secondsElapsed'] ?? 0;
           _hasStarted = saved['hasStarted'] ?? false;
           _isPaused = saved['isPaused'] ?? false;
+        } 
+        // --- 2. PULIHKAN WAKTU DARI CACHE LOKAL (Jika masuk dari "Lanjut Treatment") ---
+        else if (_jobStateCache.containsKey(_idBerhasilDigunakan)) {
+          final cache = _jobStateCache[_idBerhasilDigunakan]!;
+          _hasStarted = cache['hasStarted'] ?? _hasStarted;
+          _isPaused = cache['isPaused'] ?? false;
           
-          if (saved['treatmentsDone'] != null) {
-            _treatmentsDone = List<bool>.from(saved['treatmentsDone']);
+          int savedSec = cache['secondsElapsed'] ?? 0;
+          DateTime? lastTick = cache['lastTick'];
+          
+          if (lastTick != null && _hasStarted && !_isPaused) {
+             int diff = DateTime.now().difference(lastTick).inSeconds;
+             _secondsElapsed = savedSec + diff;
           } else {
-            _treatmentsDone = List.filled(_treatments.length, false);
+             _secondsElapsed = savedSec;
           }
+        }
+        // --- 3. JIKA BARU DIBUKA (Tanpa Cache), BACA DURASI LAMA TAPI PAUSE ---
+        else {
+          int? elapsedFromArgs = int.tryParse(args['durasi_berjalan']?.toString() ?? '') ??
+                                 int.tryParse(args['durasi_aktual']?.toString() ?? '') ??
+                                 int.tryParse(args['elapsed_time']?.toString() ?? '');
 
-          if (_hasStarted && !_isPaused) {
-            _startTimer();
-          }
-        } else {
-          _treatmentsDone = List.generate(_treatments.length, (index) {
-            final item = _treatments[index];
-            if (item is Map) {
-              var doneVal = item['is_done'];
-              if (doneVal == true || doneVal == 'true' || doneVal == 1 || doneVal == '1') return true;
-            }
-            return false;
-          });
+          if (elapsedFromArgs != null && elapsedFromArgs > 0) {
+             _secondsElapsed = elapsedFromArgs;
+             _hasStarted = true;
+             _isPaused = true; // Paksa masuk ke status Pause agar user tekan "Resume"
+          } 
+        }
+
+        // Jalankan timer HANYA jika dipulihkan dari state yang tidak di-pause
+        if (_hasStarted && !_isPaused) {
+           _startTimer();
         }
       }
       _isDataLoaded = true;
     }
   }
 
-  // 🔥 FUNGSI PENYARING CERDAS (Mencegah Backend Mengirim Placeholder 'Layanan')
-  String _getRobustTreatmentName(dynamic item) {
-    String name = '';
-    if (item is Map) {
-      for (String key in ['name', 'product_name', 'treatment_name', 'nama_layanan', 'layanan', 'deskripsi', 'judul']) {
-        if (item[key] != null && item[key].toString().trim().isNotEmpty) {
-          name = item[key].toString().trim();
-          break;
-        }
-      }
-    } else {
-      name = item.toString().trim();
-    }
-
-    // Jika API Backend mengirimkan data sampah/placeholder, KITA PAKSA AMBIL DARI SUMMARY!
-    if (name.isEmpty || name.toLowerCase() == 'layanan' || name.toLowerCase() == 'treatment' || name == 'Map<String, dynamic>' || name.startsWith('{')) {
-      name = _bookingData?['treatment_summary']?.toString() ?? '';
-    }
-    
-    if (name.isEmpty || name.toLowerCase() == 'layanan' || name.toLowerCase() == 'treatment') {
-      name = _bookingData?['treatment_name']?.toString() ?? '';
-    }
-
-    if (name.isEmpty || name.toLowerCase() == 'layanan' || name.toLowerCase() == 'treatment') {
-      name = _productName;
-    }
-
-    // Bersihkan suffix pengganggu agar cocok dengan database (misal: "Deep Tissue Massage (1x)" -> "Deep Tissue Massage")
-    name = name.replaceAll(RegExp(r'\(\d+x\)'), '').trim();
-    
-    if (name.isEmpty) return 'Treatment'; // Fallback paling akhir
-    return name;
+  // --- Fungsi Update Cache Helper ---
+  void _updateCache() {
+    if (_idBerhasilDigunakan.isEmpty) return;
+    _jobStateCache[_idBerhasilDigunakan] = {
+      'secondsElapsed': _secondsElapsed,
+      'lastTick': DateTime.now(),
+      'hasStarted': _hasStarted,
+      'isPaused': _isPaused,
+    };
   }
 
-  int _extractDurationFromProductName(String name) {
-    final RegExp regExp = RegExp(r'(\d+)\s*(min|menit|mins)', caseSensitive: false);
-    final match = regExp.firstMatch(name);
-    
-    if (match != null) {
-      int minutes = int.tryParse(match.group(1) ?? '60') ?? 60;
-      return minutes * 60; 
+  String _getRobustTreatmentName(dynamic item) {
+    String pName = '';
+    if (item is Map) {
+      pName = (item['product_name'] ?? item['name'] ?? item['treatment_name'] ?? item['deskripsi'] ?? item['nama_layanan'] ?? '').toString().trim();
+    } else {
+      pName = item?.toString().trim() ?? '';
     }
-    return 60 * 60; // Default 1 jam
+
+    if (pName.isEmpty) pName = _productName.trim();
+    if (pName.isEmpty) pName = _bookingData?['treatment_name']?.toString().trim() ?? '';
+    if (pName.isEmpty) pName = _bookingData?['treatment_summary']?.toString().trim() ?? '';
+    
+    return pName.isEmpty ? 'Treatment' : pName;
+  }
+
+  Future<Map<String, dynamic>> _robustUpdateJobStatus(ApiService api, String action, dynamic item) async {
+    List<String> idsToTry = [];
+    
+    if (item is Map) {
+      if (item['id_transaksi'] != null) idsToTry.add(item['id_transaksi'].toString());
+      if (item['transaksi_id'] != null) idsToTry.add(item['transaksi_id'].toString());
+      if (item['id_detail'] != null) idsToTry.add(item['id_detail'].toString());
+      if (item['id'] != null) idsToTry.add(item['id'].toString());
+    }
+
+    if (_idTransaksiAsli.isNotEmpty && !idsToTry.contains(_idTransaksiAsli)) idsToTry.add(_idTransaksiAsli);
+    if (_idBookingAsli.isNotEmpty && !idsToTry.contains(_idBookingAsli)) idsToTry.add(_idBookingAsli);
+
+    if (idsToTry.isEmpty) return {'success': false, 'message': 'ID Transaksi & ID Booking kosong.'};
+
+    Set<String> possibleNames = {};
+    void addName(String? n) {
+      if (n != null && n.trim().isNotEmpty) possibleNames.add(n.trim()); 
+    }
+
+    addName(_getRobustTreatmentName(item));
+    if (item is Map) {
+      addName(item['product_name']?.toString());
+      addName(item['treatment_name']?.toString());
+      addName(item['name']?.toString());
+      addName(item['deskripsi']?.toString());
+      addName(item['nama_layanan']?.toString());
+    } else {
+      addName(item?.toString());
+    }
+
+    if (_bookingData != null) {
+       addName(_bookingData!['product_name']?.toString());
+       addName(_bookingData!['treatment_name']?.toString());
+       addName(_bookingData!['treatment_summary']?.toString());
+    }
+
+    List<String> cleanedNames = possibleNames
+        .where((e) => e.isNotEmpty && e.toLowerCase() != 'treatment' && e.toLowerCase() != 'layanan')
+        .toList();
+    
+    List<String> finalNamesToTry = [];
+    for(String name in cleanedNames) {
+      finalNamesToTry.add(name); 
+      String noQty = name.replaceAll(RegExp(r'\(\d+[xX]\)'), '').trim();
+      if (noQty != name && noQty.isNotEmpty) finalNamesToTry.add(noQty); 
+      if (!name.toLowerCase().contains('x)')) finalNamesToTry.add('$name (1x)'); 
+    }
+    
+    finalNamesToTry = finalNamesToTry.where((e) => e.isNotEmpty).toSet().toList();
+    if (finalNamesToTry.isEmpty) finalNamesToTry.add('Treatment'); 
+
+    Map<String, dynamic> lastResult = {'success': false, 'message': 'Gagal terhubung ke server.'};
+    String? meaningfulError;
+    
+    for (String targetId in idsToTry) {
+      for (String pName in finalNamesToTry) {
+        debugPrint("API Test Job ($action) -> ID: $targetId | Nama: '$pName'");
+        
+        final result = await api.updateJobStatus(
+          idTransaksi: targetId,
+          action: action,
+          productName: pName,
+        );
+        
+        if (result['success'] == true || result['status'] == 'success') {
+          _idBerhasilDigunakan = targetId; 
+          return result; 
+        } else {
+          String msg = result['message']?.toString().toLowerCase() ?? '';
+          if (msg.contains('sudah dimulai') || msg.contains('sudah selesai') || msg.contains('sudah diselesaikan')) {
+             _idBerhasilDigunakan = targetId;
+             return {'success': true, 'message': result['message']};
+          }
+          if (!msg.contains('wajib diisi') && meaningfulError == null) {
+             meaningfulError = result['message'];
+          }
+        }
+        lastResult = result;
+      }
+    }
+    
+    if (meaningfulError != null) lastResult['message'] = meaningfulError;
+    return lastResult; 
+  }
+
+  int _parseDuration(dynamic durValue, String fallbackName) {
+    if (durValue != null && durValue.toString().trim().isNotEmpty) {
+      String durStr = durValue.toString().toLowerCase().trim();
+      
+      int? parsed = int.tryParse(durStr);
+      if (parsed != null && parsed > 0) return parsed;
+      
+      final RegExp regExp = RegExp(r'(\d+)');
+      final match = regExp.firstMatch(durStr);
+      if (match != null) {
+         int extracted = int.tryParse(match.group(1) ?? '60') ?? 60;
+         if (extracted > 0) return extracted;
+      }
+    }
+    
+    final RegExp regExpName = RegExp(r'(\d+)\s*(min|menit|mins)', caseSensitive: false);
+    final matchName = regExpName.firstMatch(fallbackName);
+    if (matchName != null) {
+       return int.tryParse(matchName.group(1) ?? '60') ?? 60;
+    }
+
+    return 60; 
   }
 
   @override
@@ -160,6 +281,7 @@ class _ActiveJobScreenState extends State<ActiveJobScreen> {
         setState(() {
           _secondsElapsed++;
         });
+        _updateCache(); 
       }
     });
   }
@@ -169,21 +291,10 @@ class _ActiveJobScreenState extends State<ActiveJobScreen> {
       setState(() => _isApiLoading = true);
       
       final api = ApiService();
+      dynamic firstTreatment = _treatments.isNotEmpty ? _treatments[0] : _bookingData;
       
-      // Ambil nama yang sudah disaring bersih
-      String startProductName = '';
-      if (_treatments.isNotEmpty) {
-        startProductName = _getRobustTreatmentName(_treatments[0]);
-      } else {
-        startProductName = _getRobustTreatmentName(''); 
-      }
-
-      final result = await api.updateJobStatus(
-        idTransaksi: _idTransaksi,
-        action: 'start',
-        productName: startProductName,
-      );
-
+      final result = await _robustUpdateJobStatus(api, 'start', firstTreatment);
+      
       setState(() => _isApiLoading = false);
 
       if (result['success'] == true) {
@@ -191,6 +302,7 @@ class _ActiveJobScreenState extends State<ActiveJobScreen> {
           _hasStarted = true;
           _isPaused = false;
         });
+        _updateCache();
         _startTimer();
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
@@ -200,13 +312,31 @@ class _ActiveJobScreenState extends State<ActiveJobScreen> {
           ),
         );
       } else {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(result['message'] ?? "Gagal memulai treatment dari server"), backgroundColor: Colors.red),
+        showDialog(
+          context: context,
+          builder: (ctx) => AlertDialog(
+            title: const Text("Gagal Memulai", style: TextStyle(color: Colors.red)),
+            content: Text(
+              "${result['message'] ?? 'Error tidak diketahui.'}\n\n"
+              "Saran:\n1. Pastikan Anda BENAR ditugaskan untuk layanan ini.\n"
+              "2. Pastikan ID Transaksi/Booking valid.\n"
+            ),
+            actions: [
+              TextButton(
+                onPressed: () {
+                  if (Navigator.of(ctx).canPop()) Navigator.of(ctx).pop();
+                }, 
+                child: const Text("Tutup", style: TextStyle(color: Colors.grey))
+              )
+            ],
+          )
         );
       }
-    } else {
+    } 
+    else {
       setState(() {
         _isPaused = !_isPaused;
+        _updateCache();
         if (!_isPaused && (_timer == null || !_timer!.isActive)) {
           _startTimer();
         }
@@ -220,23 +350,14 @@ class _ActiveJobScreenState extends State<ActiveJobScreen> {
     }
   }
 
-  void _showFinishDialog() {
-    if (_treatmentsDone.contains(false)) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text("Harap centang semua layanan sebelum menyelesaikan treatment!"), 
-          backgroundColor: Colors.redAccent
-        ),
-      );
-      return;
-    }
-
-    showDialog(
+  void _showFinishDialog() async {
+    // Tampilkan Dialog Konfirmasi Penyelesaian LANGSUNG
+    bool? isFinishSuccess = await showDialog<bool>(
       context: context,
-      barrierDismissible: !_isApiLoading,
-      builder: (context) {
+      barrierDismissible: false, 
+      builder: (BuildContext dialogContext) { 
         return StatefulBuilder(
-          builder: (context, setDialogState) {
+          builder: (BuildContext stateContext, StateSetter setDialogState) { 
             return AlertDialog(
               title: const Text("Selesaikan Treatment?"),
               content: _isApiLoading 
@@ -247,57 +368,49 @@ class _ActiveJobScreenState extends State<ActiveJobScreen> {
                         Text("Memproses ke server..."),
                       ],
                     )
-                  : const Text("Pastikan semua tahapan sudah selesai."),
+                  : const Text("Pastikan semua tindakan untuk treatment ini telah selesai dikerjakan."),
               actions: [
                 if (!_isApiLoading)
                   TextButton(
-                    onPressed: () => Navigator.pop(context), 
+                    onPressed: () {
+                      if (Navigator.of(dialogContext).canPop()) {
+                        Navigator.of(dialogContext).pop(false);
+                      }
+                    }, 
                     child: const Text("Batal", style: TextStyle(color: Colors.grey))
                   ),
                 ElevatedButton(
                   onPressed: _isApiLoading ? null : () async {
-                    setDialogState(() => _isApiLoading = true);
+                    setDialogState(() => _isApiLoading = true); 
                     
                     final api = ApiService();
-                    bool isAllSuccess = true;
+                    bool jobHasError = false;
                     String errorMessage = "";
 
-                    // 1. --- LOOPING TEMBAK API FINISH PER TREATMENT ---
+                    // Menyelesaikan SEMUA treatment secara otomatis di background
                     for (int i = 0; i < _treatments.length; i++) {
-                      if (_treatmentsDone[i]) {
-                        var item = _treatments[i];
-                        
-                        bool alreadyDoneFromBackend = false;
-                        if (item is Map) {
-                           var dVal = item['is_done'];
-                           alreadyDoneFromBackend = (dVal == true || dVal == 'true' || dVal == 1 || dVal == '1');
-                        }
+                      var item = _treatments[i];
+                      
+                      bool alreadyDoneFromBackend = false;
+                      if (item is Map) {
+                         var dVal = item['is_done'];
+                         alreadyDoneFromBackend = (dVal == true || dVal == 'true' || dVal == 1 || dVal == '1');
+                      }
 
-                        if (alreadyDoneFromBackend) continue; 
+                      if (alreadyDoneFromBackend) continue; 
 
-                        // Ekstrak nama aman dari filter cerdas
-                        String currentProductName = _getRobustTreatmentName(item);
-                        
-                        if (currentProductName.isNotEmpty) {
-                          final result = await api.updateJobStatus(
-                            idTransaksi: _idTransaksi,
-                            action: 'finish',
-                            productName: currentProductName,
-                          );
-                          
-                          if (result['success'] != true) {
-                            String msg = result['message']?.toString().toLowerCase() ?? '';
-                            if (!msg.contains('sudah selesai') && !msg.contains('sudah diselesaikan')) {
-                              isAllSuccess = false;
-                              errorMessage = result['message'] ?? 'Gagal menyelesaikan $currentProductName';
-                              break; 
-                            }
-                          }
-                        }
+                      final result = await _robustUpdateJobStatus(api, 'finish', item);
+                      
+                      if (result['success'] != true) {
+                        jobHasError = true;
+                        errorMessage = result['message'] ?? 'Gagal menyelesaikan treatment ke-${i+1}';
+                        break; 
                       }
                     }
 
-                    // 2. --- TEMBAK API BOOKING COMPLETED ---
+                    bool isAllSuccess = !jobHasError;
+                    
+                    // Menutup status booking jika semuanya berhasil
                     if (isAllSuccess) {
                       String idBooking = _bookingData?['id_booking']?.toString() ?? '';
                       if (idBooking.isNotEmpty) {
@@ -306,7 +419,7 @@ class _ActiveJobScreenState extends State<ActiveJobScreen> {
                           newStatus: 'Closed' 
                         );
 
-                        if (finalResult['success'] != true) {
+                        if (finalResult['success'] != true && finalResult['status'] != 'success') {
                           isAllSuccess = false;
                           errorMessage = finalResult['message'] ?? 'Gagal menutup status booking keseluruhan.';
                         }
@@ -316,23 +429,13 @@ class _ActiveJobScreenState extends State<ActiveJobScreen> {
                     if (mounted) setDialogState(() => _isApiLoading = false);
 
                     if (isAllSuccess) {
-                      Navigator.pop(context); // Tutup dialog
-                      _timer?.cancel();
-                      
-                      // Beri notifikasi sukses
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(content: Text("Treatment berhasil diselesaikan!"), backgroundColor: Colors.green),
-                      );
-
-                      // Kembali ke halaman sebelumnya dengan parameter bahwa ini sudah fix selesai total
-                      Navigator.pop(context, {
-                        'action': 'finish_treatment',
-                        'durasi_aktual': _secondsElapsed,
-                        'stepsDone': _treatmentsDone,
-                        'is_fully_completed': true 
-                      });
+                      if (Navigator.of(dialogContext).canPop()) {
+                        Navigator.of(dialogContext).pop(true);
+                      }
                     } else {
-                      Navigator.pop(context); // Tutup dialog
+                      if (Navigator.of(dialogContext).canPop()) {
+                        Navigator.of(dialogContext).pop(false);
+                      }
                       ScaffoldMessenger.of(context).showSnackBar(
                         SnackBar(content: Text(errorMessage), backgroundColor: Colors.red),
                       );
@@ -347,6 +450,30 @@ class _ActiveJobScreenState extends State<ActiveJobScreen> {
         );
       }
     );
+
+    if (isFinishSuccess == true) {
+      _timer?.cancel();
+      _jobStateCache.remove(_idBerhasilDigunakan);
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("Treatment berhasil diselesaikan!"), backgroundColor: Colors.green),
+      );
+
+      setState(() {
+        _allowPop = true;
+      });
+
+      // LANGSUNG KEMBALI KE BOOKING DETAIL MENGIRIM SIGNAL FINISH
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted && Navigator.of(context).canPop()) {
+          Navigator.of(context).pop({
+            'action': 'finish_treatment',
+            'durasi_aktual': _secondsElapsed,
+            'is_fully_completed': true,
+          });
+        }
+      });
+    }
   }
 
   String _formatDuration(int totalSeconds) {
@@ -365,25 +492,35 @@ class _ActiveJobScreenState extends State<ActiveJobScreen> {
     return '${minutes.toString().padLeft(2, '0')}:${seconds.toString().padLeft(2, '0')}';
   }
 
+  // 🔥 PERBAIKAN: Mencegah looping saat tekan Back dan menghindari salah tafsir di BookingDetail
   void _saveStateAndPop() {
+    if (_allowPop) return; 
     _timer?.cancel();
-    Navigator.pop(context, {
-      'action': 'save_state',
-      'product_name': _productName,
-      'secondsElapsed': _secondsElapsed,
-      'treatmentsDone': _treatmentsDone,
-      'hasStarted': _hasStarted,
-      'isPaused': _isPaused,
+    _updateCache();
+    
+    setState(() {
+      _allowPop = true;
+    });
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted && Navigator.of(context).canPop()) {
+        // Mengirimkan parameter 'back' yang tegas agar layar BookingDetail
+        // sadar bahwa Anda hanya kembali (bukan Selesai).
+        Navigator.of(context).pop({
+          'action': 'back',
+          'is_fully_completed': false,
+        });
+      }
     });
   }
 
   @override
   Widget build(BuildContext context) {
     return PopScope(
-      canPop: false, 
+      canPop: _allowPop, 
       onPopInvoked: (didPop) {
         if (didPop) return;
-        _saveStateAndPop();
+        _saveStateAndPop(); 
       },
       child: Scaffold(
         backgroundColor: const Color(0xFFFAFAFA),
@@ -426,7 +563,6 @@ class _ActiveJobScreenState extends State<ActiveJobScreen> {
 
   Widget _buildHeaderInfo() {
     String rawCustomerName = _bookingData?['customer_name']?.toString() ?? '';
-    
     if (rawCustomerName.trim().isEmpty) {
       rawCustomerName = _bookingData?['customer_fullname']?.toString() ?? ''; 
     }
@@ -449,22 +585,6 @@ class _ActiveJobScreenState extends State<ActiveJobScreen> {
                 const SizedBox(height: 4),
                 Text(labelLayanan, style: const TextStyle(color: Colors.white, fontSize: 14), maxLines: 1, overflow: TextOverflow.ellipsis),
               ],
-            ),
-          ),
-          
-          InkWell(
-            onTap: () {
-              Navigator.pushNamed(
-                context, 
-                '/cek_pemeriksaan', 
-                arguments: _bookingData, 
-              );
-            },
-            borderRadius: BorderRadius.circular(12),
-            child: Container(
-              padding: const EdgeInsets.all(8),
-              decoration: BoxDecoration(border: Border.all(color: Colors.white, width: 1.5), borderRadius: BorderRadius.circular(12)),
-              child: const Icon(Icons.assignment_ind_outlined, color: Colors.white, size: 20),
             ),
           ),
         ],
@@ -521,7 +641,6 @@ class _ActiveJobScreenState extends State<ActiveJobScreen> {
   Widget _buildProgressSection() {
     if (_treatments.isEmpty) return const SizedBox.shrink();
 
-    int finishedCount = _treatmentsDone.where((element) => element == true).length;
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.symmetric(horizontal: 20),
@@ -529,78 +648,53 @@ class _ActiveJobScreenState extends State<ActiveJobScreen> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           const Text('Daftar Treatment', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-          const SizedBox(height: 4),
-          Text('$finishedCount dari ${_treatments.length} selesai dikerjakan', style: TextStyle(fontSize: 12, color: Colors.grey.shade600)),
           const SizedBox(height: 16),
           for (int i = 0; i < _treatments.length; i++)
-            _buildTreatmentCard(i, _treatments[i], isDone: _treatmentsDone[i]),
+            _buildTreatmentCard(_treatments[i]),
         ],
       ),
     );
   }
 
-  Widget _buildTreatmentCard(int index, dynamic item, {required bool isDone}) {
+  Widget _buildTreatmentCard(dynamic item) {
     String name = _getRobustTreatmentName(item); 
     
     String qty = item is Map ? (item['qty']?.toString() ?? '1') : '1';
-    int durasiMenit = item is Map ? (int.tryParse(item['durasi']?.toString() ?? '60') ?? 60) : 60;
+    int durasiMenit = 60;
+    
+    if (item is Map) {
+      durasiMenit = _parseDuration(item['duration'] ?? item['durasi'], name);
+    } else {
+      durasiMenit = _parseDuration(null, name);
+    }
 
     return Padding(
       padding: const EdgeInsets.only(bottom: 12.0),
-      child: InkWell(
-        onTap: () {
-          if (!_hasStarted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(content: Text('Mulai treatment terlebih dahulu.'), duration: Duration(seconds: 1)),
-            );
-            return;
-          }
-          setState(() { _treatmentsDone[index] = !_treatmentsDone[index]; });
-        },
-        borderRadius: BorderRadius.circular(12),
-        child: Container(
-          padding: const EdgeInsets.all(16),
-          decoration: BoxDecoration(
-            color: isDone ? Colors.green.withOpacity(0.05) : Colors.white,
-            border: Border.all(color: isDone ? Colors.green.shade300 : Colors.grey.shade200),
-            borderRadius: BorderRadius.circular(12),
-            boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.02), blurRadius: 4, offset: const Offset(0, 2))],
-          ),
-          child: Row(
-            children: [
-              Container(
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  color: isDone ? Colors.green : Colors.transparent,
-                  border: Border.all(color: isDone ? Colors.green : Colors.grey.shade400, width: 2),
-                ),
-                padding: const EdgeInsets.all(2),
-                child: Icon(Icons.check, size: 16, color: isDone ? Colors.white : Colors.transparent),
-              ),
-              const SizedBox(width: 16),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      name, 
-                      style: TextStyle(
-                        fontSize: 14, 
-                        fontWeight: FontWeight.bold,
-                        color: Colors.black87,
-                        decoration: isDone ? TextDecoration.lineThrough : null, 
-                      )
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      'Jumlah: $qty x  •  Durasi: $durasiMenit menit', 
-                      style: TextStyle(fontSize: 12, color: Colors.grey.shade600)
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
+      child: Container(
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          border: Border.all(color: Colors.grey.shade200),
+          borderRadius: BorderRadius.circular(12),
+          boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.02), blurRadius: 4, offset: const Offset(0, 2))],
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              name, 
+              style: const TextStyle(
+                fontSize: 14, 
+                fontWeight: FontWeight.bold,
+                color: Colors.black87,
+              )
+            ),
+            const SizedBox(height: 4),
+            Text(
+              'Jumlah: $qty x  •  Durasi: $durasiMenit menit', 
+              style: TextStyle(fontSize: 12, color: Colors.grey.shade600)
+            ),
+          ],
         ),
       ),
     );
@@ -649,7 +743,7 @@ class _ActiveJobScreenState extends State<ActiveJobScreen> {
               child: const Text('Selesai Treatment', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
             ),
           ),
-        ],
+        ],  
       ),
     );
   }

@@ -17,12 +17,12 @@ class _EarningsScreenState extends State<EarningsScreen> {
   String _selectedTab = 'Treatment'; 
   bool _isLoading = true;
 
-  // --- VARIABEL KOTAK PINK DARI API (SISA SALDO AKTIF / AVAILABLE BALANCE) ---
+  // --- VARIABEL KOTAK PINK DARI API SEBAGAI FALLBACK ---
   double _totalKomisiAllTime = 0;
   double _komisiTreatmentAllTime = 0;
   double _komisiPaketAllTime = 0;
 
-  // --- VARIABEL OMSET API ---
+  // --- VARIABEL OMSET API SEBAGAI FALLBACK ---
   double _pendapatanKotorTreatment = 0;
   double _totalPenjualanPaket = 0;
   
@@ -87,8 +87,7 @@ class _EarningsScreenState extends State<EarningsScreen> {
       setState(() {
         _selectedDateRange = picked;
       });
-      // Panggil ulang API untuk update data Omset saja saat difilter
-      _fetchEarningsData();
+      _fetchAllData();
     }
   }
 
@@ -97,41 +96,32 @@ class _EarningsScreenState extends State<EarningsScreen> {
     setState(() => _isLoading = true);
     
     try {
-      // 1. SELALU AMBIL DATA ALL-TIME UNTUK KOTAK PINK (PAYOUT / AVAILABLE BALANCE)
-      final respAllTime = await ApiService().getBalance();
-      Map<String, dynamic> dataAllTime = {};
-      if (respAllTime['status'] == 'success' || respAllTime['success'] == true) {
-        dataAllTime = respAllTime['data'] ?? {};
+      String? startStr;
+      String? endStr;
+
+      if (_selectedDateRange != null) {
+        startStr = DateFormat('yyyy-MM-dd').format(_selectedDateRange!.start);
+        endStr = DateFormat('yyyy-MM-dd').format(_selectedDateRange!.end);
       }
 
-      // 2. AMBIL DATA FILTER JIKA TANGGAL DIPILIH UNTUK OMSET
-      Map<String, dynamic> dataFiltered = dataAllTime;
-      if (_selectedDateRange != null) {
-        String startStr = DateFormat('yyyy-MM-dd').format(_selectedDateRange!.start);
-        String endStr = DateFormat('yyyy-MM-dd').format(_selectedDateRange!.end);
-        final respFiltered = await ApiService().getBalance(startDate: startStr, endDate: endStr);
-        if (respFiltered['status'] == 'success' || respFiltered['success'] == true) {
-          dataFiltered = respFiltered['data'] ?? {};
-        }
+      final response = await ApiService().getBalance(startDate: startStr, endDate: endStr);
+      Map<String, dynamic> data = {};
+      
+      if (response['status'] == 'success' || response['success'] == true) {
+        data = response['data'] ?? {};
       }
 
       setState(() {
-        // 🔥 PERBAIKAN: Fokus mengambil data "available_balance" atau "total_balance" asli dari server
-        _totalKomisiAllTime = _parseDouble(dataAllTime['total_balance_keseluruhan'] ?? dataAllTime['available_balance'] ?? dataAllTime['total_balance']);
+        _totalKomisiAllTime = _parseDouble(data['total_balance_keseluruhan'] ?? data['total_balance']);
         
-        final Map<String, dynamic> tAllTime = dataAllTime['treatment'] ?? {};
-        final Map<String, dynamic> pAllTime = dataAllTime['paket'] ?? {};
+        final Map<String, dynamic> tData = data['treatment'] ?? {};
+        final Map<String, dynamic> pData = data['paket'] ?? {};
         
-        // Kotak Pink Treatment
-        _komisiTreatmentAllTime = _parseDouble(tAllTime['total_balance_treatment'] ?? tAllTime['available_balance'] ?? tAllTime['komisi_treatment']);
-        // Kotak Pink Paket
-        _komisiPaketAllTime = _parseDouble(pAllTime['total_balance_paket'] ?? pAllTime['available_balance'] ?? pAllTime['komisi_paket']);
+        _komisiTreatmentAllTime = _parseDouble(tData['total_balance_treatment'] ?? tData['komisi_treatment']);
+        _komisiPaketAllTime = _parseDouble(pData['total_balance_paket'] ?? pData['komisi_paket_bersih']);
         
-        // --- DATA OMSET DI BAWAH KOTAK PINK (TERPENGARUH FILTER) ---
-        final Map<String, dynamic> tFiltered = dataFiltered['treatment'] ?? {};
-        final Map<String, dynamic> pFiltered = dataFiltered['paket'] ?? {};
-        _pendapatanKotorTreatment = _parseDouble(tFiltered['pendapatan_sebelum_diskon'] ?? tFiltered['total_omset']);
-        _totalPenjualanPaket = _parseDouble(pFiltered['harga_paket'] ?? pFiltered['total_omset']);
+        _pendapatanKotorTreatment = _parseDouble(tData['pendapatan_sebelum_diskon'] ?? tData['total_omset']);
+        _totalPenjualanPaket = _parseDouble(pData['harga_paket'] ?? pData['total_omset']);
         
         _isLoading = false;
       });
@@ -144,7 +134,15 @@ class _EarningsScreenState extends State<EarningsScreen> {
   // --- FUNGSI TARIK API RIWAYAT PENARIKAN (PAYOUT) & RINCIAN TREATMENT ---
   Future<void> _fetchPayoutHistory() async {
     try {
-      final response = await ApiService().getPayoutHistory();
+      String? startStr;
+      String? endStr;
+
+      if (_selectedDateRange != null) {
+        startStr = DateFormat('yyyy-MM-dd').format(_selectedDateRange!.start);
+        endStr = DateFormat('yyyy-MM-dd').format(_selectedDateRange!.end);
+      }
+
+      final response = await ApiService().getPayoutHistory(startDate: startStr, endDate: endStr);
       
       if (response['status'] == 'success' || response['success'] == true) {
         if (mounted) {
@@ -166,7 +164,18 @@ class _EarningsScreenState extends State<EarningsScreen> {
               final paketData = balanceInfo['paket'] ?? {};
 
               _rincianTreatment = treatmentData['rincian_treatment'] ?? balanceInfo['rincian_treatment'] ?? [];
-              _rincianPaket = paketData['rincian_paket'] ?? balanceInfo['rincian_paket'] ?? [];
+              
+              // 🔥 GABUNGKAN RINCIAN NORMAL DAN RINCIAN OVERRIDE (DEDUCTION) AGAR SEMUA MUNCUL DI LIST
+              List<dynamic> listPaketGabungan = [];
+              if (paketData['rincian_paket'] != null) listPaketGabungan.addAll(paketData['rincian_paket']);
+              if (paketData['rincian_override'] != null) listPaketGabungan.addAll(paketData['rincian_override']);
+              
+              // Fallback
+              if (listPaketGabungan.isEmpty && balanceInfo['rincian_paket'] != null) {
+                listPaketGabungan.addAll(balanceInfo['rincian_paket']);
+              }
+              
+              _rincianPaket = listPaketGabungan;
             }
           });
         }
@@ -195,12 +204,11 @@ class _EarningsScreenState extends State<EarningsScreen> {
     return '$start - $end';
   }
 
-  // FUNGSI FILTER LIST LOKAL AGAR DAFTAR SESUAI TANGGAL YANG DIPILIH
-  List<dynamic> _filterListByDate(List<dynamic> list, String dateFieldKey) {
-    if (_selectedDateRange == null) return list; // Kembalikan semua jika tidak ada filter
+  List<dynamic> _filterListByDate(List<dynamic> list, String primaryKey, {String? fallbackKey}) {
+    if (_selectedDateRange == null) return list; 
     
     return list.where((item) {
-      String tgl = item[dateFieldKey] ?? item['created_at'] ?? '';
+      String tgl = item[primaryKey] ?? (fallbackKey != null ? item[fallbackKey] : null) ?? item['created_at'] ?? '';
       if (tgl.isEmpty) return true; 
       
       try {
@@ -226,7 +234,6 @@ class _EarningsScreenState extends State<EarningsScreen> {
           : Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            // 1. Header
             Padding(
               padding: const EdgeInsets.fromLTRB(20, 24, 20, 16), 
               child: Row(
@@ -246,7 +253,6 @@ class _EarningsScreenState extends State<EarningsScreen> {
               ),
             ),
 
-            // 2. Row Periode (Tidak tampil di tab Riwayat Penarikan)
             if (_selectedTab != 'Riwayat Penarikan')
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 20.0),
@@ -260,7 +266,7 @@ class _EarningsScreenState extends State<EarningsScreen> {
                           GestureDetector(
                             onTap: () {
                               setState(() => _selectedDateRange = null);
-                              _fetchEarningsData(); // Kembalikan ke Semua Waktu
+                              _fetchAllData(); 
                             },
                             child: Padding(
                               padding: const EdgeInsets.only(right: 8.0),
@@ -293,7 +299,6 @@ class _EarningsScreenState extends State<EarningsScreen> {
                 ),
               ),
 
-            // 3. Card Dinamis (Komisi / Payout)
             AnimatedSwitcher(
               duration: const Duration(milliseconds: 300),
               transitionBuilder: (Widget child, Animation<double> animation) {
@@ -303,12 +308,9 @@ class _EarningsScreenState extends State<EarningsScreen> {
             ),
             
             const SizedBox(height: 24),
-
-            // 4. Custom Tabs
             _buildTabs(),
             const SizedBox(height: 24),
 
-            // 5. Container List Riwayat Dinamis
             Expanded(
               child: Container(
                 padding: const EdgeInsets.fromLTRB(20, 10, 20, 0),
@@ -329,11 +331,58 @@ class _EarningsScreenState extends State<EarningsScreen> {
   }
 
   Widget _buildEarningsCard() {
+    double computedKomisiTreatment = 0;
+    double computedOmsetTreatment = 0;
+    
+    final filteredTreatment = _filterListByDate(_rincianTreatment, 'tgl_dokumen');
+    for (var item in filteredTreatment) {
+      double omset = _parseDouble(item['pendapatan_sebelum_diskon']);
+      double komisi = _parseDouble(item['komisi']);
+      if (komisi <= 0 && omset > 0) komisi = omset * 0.05; 
+      
+      computedOmsetTreatment += omset;
+      computedKomisiTreatment += komisi;
+    }
+
+    double computedKomisiPaket = 0;
+    double computedOmsetPaket = 0;
+    
+    final filteredPaket = _filterListByDate(_rincianPaket, 'tgl_transaksi', fallbackKey: 'tgl_dokumen');
+    for (var item in filteredPaket) {
+      bool isOverrideDeduction = item.containsKey('overriding_terapis') && item.containsKey('potongan_komisi');
+      
+      if (isOverrideDeduction) {
+        double potongan = _parseDouble(item['potongan_komisi']);
+        computedKomisiPaket -= potongan;
+      } else {
+        double omset = _parseDouble(item['harga_paket']);
+        double komisiKotor = _parseDouble(item['komisi_paket_kotor'] ?? item['komisi_kotor'] ?? item['komisi']);
+        double override = _parseDouble(item['potongan_override'] ?? item['potongan_komisi']);
+        double komisiBersih = _parseDouble(item['komisi_paket_bersih'] ?? item['komisi_bersih'] ?? item['komisi']);
+        
+        if (komisiKotor <= 0 && omset > 0) {
+          komisiKotor = omset * 0.05;
+          komisiBersih = komisiKotor - override;
+        }
+        
+        computedOmsetPaket += omset;
+        computedKomisiPaket += komisiBersih;
+      }
+    }
+
     String mainTitle = _selectedTab == 'Treatment' ? 'Total Komisi Treatment' : 'Total Komisi Paket';
     String subTitle = _selectedTab == 'Treatment' ? 'Total Omset Keseluruhan' : 'Total Penjualan Paket';
     
-    double mainAmount = _selectedTab == 'Treatment' ? _komisiTreatmentAllTime : _komisiPaketAllTime;
-    double omsetAmount = _selectedTab == 'Treatment' ? _pendapatanKotorTreatment : _totalPenjualanPaket;
+    double mainAmount = _selectedTab == 'Treatment' ? computedKomisiTreatment : computedKomisiPaket;
+    double omsetAmount = _selectedTab == 'Treatment' ? computedOmsetTreatment : computedOmsetPaket;
+
+    if (_selectedTab == 'Treatment' && filteredTreatment.isEmpty) {
+      mainAmount = _komisiTreatmentAllTime;
+      omsetAmount = _pendapatanKotorTreatment;
+    } else if (_selectedTab == 'Paket' && filteredPaket.isEmpty) {
+      mainAmount = _komisiPaketAllTime;
+      omsetAmount = _totalPenjualanPaket;
+    }
 
     return Container(
       key: ValueKey('EarningsCard_$_selectedTab'),
@@ -355,7 +404,6 @@ class _EarningsScreenState extends State<EarningsScreen> {
                 const SizedBox(height: 8),
                 Text(formatRupiah(mainAmount), style: const TextStyle(color: Colors.white, fontSize: 32, fontWeight: FontWeight.bold)),
                 
-                // TOMBOL REQUEST PAYOUT
                 const SizedBox(height: 16),
                 SizedBox(
                   width: double.infinity,
@@ -406,8 +454,39 @@ class _EarningsScreenState extends State<EarningsScreen> {
   }
 
   Widget _buildPayoutCard() {
-    // 🔥 PERBAIKAN: Total Keseluruhan = Treatment + Paket
-    double totalKeseluruhan = _komisiTreatmentAllTime + _komisiPaketAllTime;
+    double totalKeseluruhan = 0;
+    
+    final filteredTreatment = _filterListByDate(_rincianTreatment, 'tgl_dokumen');
+    for (var item in filteredTreatment) {
+      double omset = _parseDouble(item['pendapatan_sebelum_diskon']);
+      double komisi = _parseDouble(item['komisi']);
+      if (komisi <= 0 && omset > 0) komisi = omset * 0.05;
+      totalKeseluruhan += komisi;
+    }
+
+    final filteredPaket = _filterListByDate(_rincianPaket, 'tgl_transaksi', fallbackKey: 'tgl_dokumen');
+    for (var item in filteredPaket) {
+      bool isOverrideDeduction = item.containsKey('overriding_terapis') && item.containsKey('potongan_komisi');
+      
+      if (isOverrideDeduction) {
+        double potongan = _parseDouble(item['potongan_komisi']);
+        totalKeseluruhan -= potongan;
+      } else {
+        double omset = _parseDouble(item['harga_paket']);
+        double komisiKotor = _parseDouble(item['komisi_paket_kotor'] ?? item['komisi_kotor'] ?? item['komisi']);
+        double override = _parseDouble(item['potongan_override'] ?? item['potongan_komisi']);
+        double komisiBersih = _parseDouble(item['komisi_paket_bersih'] ?? item['komisi_bersih'] ?? item['komisi']);
+        if (komisiKotor <= 0 && omset > 0) {
+          komisiKotor = omset * 0.05;
+          komisiBersih = komisiKotor - override;
+        }
+        totalKeseluruhan += komisiBersih;
+      }
+    }
+
+    if (filteredTreatment.isEmpty && filteredPaket.isEmpty) {
+       totalKeseluruhan = _totalKomisiAllTime;
+    }
 
     return Container(
       key: const ValueKey('PayoutCard'),
@@ -523,25 +602,17 @@ class _EarningsScreenState extends State<EarningsScreen> {
         final pendapatanKotorItem = _parseDouble(item['pendapatan_sebelum_diskon']);
         double komisiItem = _parseDouble(item['komisi']);
 
-        // Jika API mengirim komisi 0, hitung otomatis 5% dari harga khusus untuk TAMPILAN LIST SAJA.
         if (komisiItem <= 0 && pendapatanKotorItem > 0) {
           komisiItem = pendapatanKotorItem * 0.05;
         }
         
-        String tglDokumen = item['tgl_dokumen'] ?? '';
-        String jam = item['jam'] ?? '';
-        
-        String displayDate = tglDokumen;
-        String displayTime = jam;
+        String timestamp = item['created_at'] ?? item['tgl_dokumen'] ?? '';
+        String displayDate = timestamp;
 
         try {
-          if (tglDokumen.isNotEmpty) {
-            DateTime dt = DateTime.parse(tglDokumen);
+          if (timestamp.isNotEmpty) {
+            DateTime dt = DateTime.parse(timestamp);
             displayDate = DateFormat('dd MMM yyyy').format(dt);
-          }
-          if (jam.isNotEmpty) {
-            DateTime dtTime = DateTime.parse('${tglDokumen.isNotEmpty ? tglDokumen : '1970-01-01'} $jam');
-            displayTime = DateFormat('HH:mm').format(dtTime);
           }
         } catch (e) {}
 
@@ -554,16 +625,7 @@ class _EarningsScreenState extends State<EarningsScreen> {
                 width: 100,
                 child: Padding(
                   padding: const EdgeInsets.only(top: 2.0),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(displayDate, style: TextStyle(fontSize: 11, color: Colors.grey.shade700, fontWeight: FontWeight.bold)),
-                      if (displayTime.isNotEmpty) ...[
-                        const SizedBox(height: 4),
-                        Text(displayTime, style: TextStyle(fontSize: 11, color: Colors.grey.shade500, fontWeight: FontWeight.w500)),
-                      ]
-                    ],
-                  ),
+                  child: Text(displayDate, style: TextStyle(fontSize: 11, color: Colors.grey.shade700, fontWeight: FontWeight.bold)),
                 ),
               ),
               Expanded(
@@ -599,68 +661,168 @@ class _EarningsScreenState extends State<EarningsScreen> {
   }
 
   Widget _buildPaketListView() {
-    final filteredList = _filterListByDate(_rincianPaket, 'tgl_transaksi');
+    final filteredList = _filterListByDate(_rincianPaket, 'tgl_transaksi', fallbackKey: 'tgl_dokumen');
 
     if (filteredList.isEmpty) {
       return Center(
-        child: Text('Belum ada penjualan paket.', style: TextStyle(color: Colors.grey.shade500))
+        child: Text('Belum ada riwayat paket.', style: TextStyle(color: Colors.grey.shade500))
       );
     }
 
+    // Mengembalikan data menjadi satuan (tanpa di-grouping)
+    final listToDisplay = List<dynamic>.from(filteredList);
+
+    listToDisplay.sort((a, b) {
+      String dateA = a['created_at'] ?? a['tgl_transaksi'] ?? a['tgl_dokumen'] ?? '';
+      String dateB = b['created_at'] ?? b['tgl_transaksi'] ?? b['tgl_dokumen'] ?? '';
+      return dateB.compareTo(dateA); 
+    });
+
     return ListView.separated(
       padding: const EdgeInsets.only(top: 10, bottom: 20),
-      itemCount: filteredList.length,
+      itemCount: listToDisplay.length,
       separatorBuilder: (context, index) => Padding(
         padding: const EdgeInsets.symmetric(vertical: 8.0),
         child: Divider(color: Colors.grey.shade200, height: 1),
       ),
       itemBuilder: (context, index) {
-        final item = filteredList[index];
-        final namaPaket = item['package_custom_name'] ?? 'Paket Tidak Diketahui';
-        final hargaPaket = _parseDouble(item['harga_paket']);
-        double komisiItem = _parseDouble(item['komisi']);
-
-        // Jika API mengirim komisi 0, hitung otomatis 5% dari harga khusus untuk TAMPILAN LIST SAJA.
-        if (komisiItem <= 0 && hargaPaket > 0) {
-          komisiItem = hargaPaket * 0.05;
-        }
+        final item = listToDisplay[index];
         
-        String tglTransaksi = item['tgl_transaksi'] ?? '';
-        String displayDatePaket = tglTransaksi;
-        String displayTimePaket = '';
-
-        try {
-          if (tglTransaksi.isNotEmpty) {
-            DateTime dt = DateTime.parse(tglTransaksi);
-            displayDatePaket = DateFormat('dd MMM yyyy').format(dt);
-            displayTimePaket = DateFormat('HH:mm').format(dt);
+        // 🔥 PERBAIKAN: Pencarian nama paket secara AGRESIF ANTI "POTONGAN" & "OVERRIDE"
+        String namaPaket = '';
+        final keysToTry = [
+          'package_custom_name', 'nama_paket_asli', 'nama_paket', 'package_name', 
+          'treatment_name', 'product_name', 'nama_layanan', 'name', 'deskripsi', 'paket'
+        ];
+        
+        for (var key in keysToTry) {
+          String val = item[key]?.toString() ?? '';
+          String lowerVal = val.trim().toLowerCase();
+          
+          if (lowerVal.isNotEmpty && 
+              lowerVal != 'override' && 
+              !lowerVal.contains('potongan sesi') &&
+              !lowerVal.contains('potongan paket')) {
+            namaPaket = val.trim();
+            break;
           }
-        } catch (e) {}
+        }
 
-        return Padding(
-          padding: const EdgeInsets.symmetric(vertical: 6.0),
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              SizedBox(
-                width: 100,
-                child: Padding(
-                  padding: const EdgeInsets.only(top: 2.0),
+        // Brute-force: Cari value string apapun yang masuk akal jika semua key gagal
+        if (namaPaket.isEmpty) {
+          for (var entry in item.entries) {
+            String val = entry.value?.toString() ?? '';
+            String lowerVal = val.trim().toLowerCase();
+            
+            if (lowerVal.isNotEmpty && 
+                lowerVal != 'override' && 
+                !lowerVal.contains('potongan sesi') &&
+                !lowerVal.contains('potongan paket')) {
+              // Cek apakah string ini bukan sekadar angka/tanggal/status
+              if (val.length > 4 && !RegExp(r'^[0-9\-\:\s]+$').hasMatch(val)) {
+                if (!['status', 'id', 'created_at', 'updated_at', 'tgl_transaksi', 'tgl_dokumen'].contains(entry.key.toLowerCase())) {
+                  namaPaket = val.trim();
+                  break;
+                }
+              }
+            }
+          }
+        }
+
+        if (namaPaket.isEmpty) {
+          namaPaket = 'Treatment Paket';
+        }
+
+        bool isOverrideDeduction = item.containsKey('overriding_terapis') && item.containsKey('potongan_komisi');
+
+        if (isOverrideDeduction) {
+          // =========================================================================
+          // RENDER UI KHUSUS: OVERRIDE
+          // =========================================================================
+          String namaPengerja = item['overriding_terapis']?.toString() ?? 'Terapis Lain';
+          double potonganTotal = _parseDouble(item['potongan_komisi']);
+          
+          String timestamp = item['created_at'] ?? item['tgl_dokumen'] ?? item['tgl_transaksi'] ?? '';
+          String displayDatePaket = timestamp;
+          
+          try {
+            if (timestamp.isNotEmpty) {
+              DateTime dt = DateTime.parse(timestamp);
+              displayDatePaket = DateFormat('dd MMM yyyy').format(dt);
+            }
+          } catch (_) {}
+
+          return Padding(
+            padding: const EdgeInsets.symmetric(vertical: 6.0),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                SizedBox(
+                  width: 100,
+                  child: Text(displayDatePaket, style: TextStyle(fontSize: 11, color: Colors.grey.shade700, fontWeight: FontWeight.bold)),
+                ),
+                Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(displayDatePaket, style: TextStyle(fontSize: 11, color: Colors.grey.shade700, fontWeight: FontWeight.bold)),
-                      if (displayTimePaket.isNotEmpty) ...[
-                        const SizedBox(height: 4),
-                        Text(displayTimePaket, style: TextStyle(fontSize: 11, color: Colors.grey.shade500, fontWeight: FontWeight.w500)),
-                      ]
+                      Text(namaPaket, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: Colors.black87)),
+                      const SizedBox(height: 4),
+                      Text('Dikerjakan oleh: $namaPengerja', style: TextStyle(fontSize: 12, color: Colors.orange.shade700, fontWeight: FontWeight.bold)),
+                      const SizedBox(height: 2),
+                      Text('Status: Di-override', style: TextStyle(fontSize: 11, color: Colors.grey.shade600, fontStyle: FontStyle.italic)),
                     ],
                   ),
                 ),
-              ),
-              Expanded(
-                child: Padding(
-                  padding: const EdgeInsets.only(top: 2.0),
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  children: [
+                    Text('- ${formatRupiah(potonganTotal)}', style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: Colors.red.shade600)),
+                    const SizedBox(height: 6),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                      decoration: BoxDecoration(color: Colors.red.shade50, borderRadius: BorderRadius.circular(12)),
+                      child: Text('Minus', style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Colors.red.shade600)),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          );
+
+        } else {
+          // =========================================================================
+          // RENDER UI STANDAR: PAKET BIASA
+          // =========================================================================
+          final hargaPaket = _parseDouble(item['harga_paket']);
+          double komisiKotor = _parseDouble(item['komisi_paket_kotor'] ?? item['komisi_kotor'] ?? item['komisi']);
+          double potonganOverride = _parseDouble(item['potongan_override'] ?? item['potongan_komisi']);
+          double komisiBersih = _parseDouble(item['komisi_paket_bersih'] ?? item['komisi_bersih'] ?? item['komisi']);
+
+          if (komisiKotor <= 0 && hargaPaket > 0) {
+            komisiKotor = hargaPaket * 0.05;
+            komisiBersih = komisiKotor - potonganOverride;
+          }
+
+          String timestamp = item['created_at'] ?? item['tgl_transaksi'] ?? item['tgl_dokumen'] ?? '';
+          String displayDatePaket = timestamp;
+
+          try {
+            if (timestamp.isNotEmpty) {
+              DateTime dt = DateTime.parse(timestamp);
+              displayDatePaket = DateFormat('dd MMM yyyy').format(dt);
+            }
+          } catch (_) {}
+
+          return Padding(
+            padding: const EdgeInsets.symmetric(vertical: 6.0),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                SizedBox(
+                  width: 100,
+                  child: Text(displayDatePaket, style: TextStyle(fontSize: 11, color: Colors.grey.shade700, fontWeight: FontWeight.bold)),
+                ),
+                Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
@@ -670,22 +832,22 @@ class _EarningsScreenState extends State<EarningsScreen> {
                     ],
                   ),
                 ),
-              ),
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.end,
-                children: [
-                  Text('+ ${formatRupiah(komisiItem)}', style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: Colors.green)),
-                  const SizedBox(height: 6),
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                    decoration: BoxDecoration(color: Colors.green.shade50, borderRadius: BorderRadius.circular(12)),
-                    child: Text('Completed', style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Colors.green.shade600)),
-                  ),
-                ],
-              ),
-            ],
-          ),
-        );
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  children: [
+                    Text('+ ${formatRupiah(komisiBersih)}', style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: Colors.green)),
+                    const SizedBox(height: 6),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                      decoration: BoxDecoration(color: Colors.green.shade50, borderRadius: BorderRadius.circular(12)),
+                      child: Text('Completed', style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Colors.green.shade600)),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          );
+        }
       },
     );
   }
