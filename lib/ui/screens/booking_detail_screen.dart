@@ -21,14 +21,12 @@ class _BookingDetailScreenState extends State<BookingDetailScreen> {
   Map<String, dynamic>? _data;
   bool _isInitialized = false;
   bool _isUpdatingStatus = false; 
-  bool _isLoadingDetail = false; // Flag untuk loading detail terbaru dari API
+  bool _isLoadingDetail = false; 
   
-  // Variabel untuk menyimpan data Selfie & Lokasi
   String? _arrivalPhotoPath; 
   Position? _currentPosition;
   String _photoTimestamp = '';
 
-  // --- STATE BARU: Melacak apakah pemeriksaan di-skip ---
   bool _isPemeriksaanSkipped = false;
 
   @override
@@ -37,7 +35,7 @@ class _BookingDetailScreenState extends State<BookingDetailScreen> {
     if (!_isInitialized) {
       final args = ModalRoute.of(context)?.settings.arguments as Map<String, dynamic>?;
       if (args != null) {
-        _data = Map<String, dynamic>.from(args); // Copy agar bisa dimodifikasi
+        _data = Map<String, dynamic>.from(args); 
         String passedStatus = args['booking_status'] ?? args['status'] ?? 'Open';
         passedStatus = passedStatus.trim(); 
         
@@ -46,7 +44,6 @@ class _BookingDetailScreenState extends State<BookingDetailScreen> {
         }
         _currentStatus = passedStatus;
 
-        // Fetch detail terbaru untuk mendapatkan alamat lengkap & koordinat
         final idTrans = _data?['id_transaksi']?.toString();
         if (idTrans != null && idTrans.isNotEmpty) {
           _loadJobDetail(idTrans);
@@ -58,7 +55,6 @@ class _BookingDetailScreenState extends State<BookingDetailScreen> {
     }
   }
 
-  // --- FUNGSI MENGAMBIL DETAIL TERBARU DARI API ---
   Future<void> _loadJobDetail(String idTransaksi) async {
     setState(() => _isLoadingDetail = true);
     
@@ -66,13 +62,12 @@ class _BookingDetailScreenState extends State<BookingDetailScreen> {
     
     if (mounted && response['success'] == true) {
       setState(() {
-        // Gabungkan data baru dari API (seperti address, coordinate_address) ke _data
         _data!['address'] = response['address'];
         _data!['coordinate_address'] = response['coordinate_address'];
         _data!['catatan_alamat'] = response['catatan_alamat'];
         
         if (response['data'] != null && response['data'] is List) {
-          _data!['treatments'] = response['data']; // Update daftar layanan jika ada perubahan
+          _data!['treatments'] = response['data']; 
         }
       });
     }
@@ -92,7 +87,6 @@ class _BookingDetailScreenState extends State<BookingDetailScreen> {
     }
   }
 
-  // Helper untuk mengubah key status API menjadi teks tampilan bahasa Indonesia
   String _getStatusLabel(String status) {
     switch (status.toLowerCase()) {
       case 'accepted': return 'Pekerjaan di terima';
@@ -105,14 +99,11 @@ class _BookingDetailScreenState extends State<BookingDetailScreen> {
     }
   }
 
-  // --- FUNGSI MEMBUKA GOOGLE MAPS ---
   Future<void> _openMap(String coordinate) async {
     if (coordinate.isEmpty) return;
 
     final cleanCoordinate = coordinate.replaceAll(' ', '');
-    // Coba buka dengan intent navigasi (biasanya langsung buka mode arahkan jalan di Android)
     final Uri googleMapsUrl = Uri.parse("google.navigation:q=$cleanCoordinate");
-    // Fallback URL jika device tidak support URL navigasi intent (contohnya iOS)
     final Uri fallbackUrl = Uri.parse("https://www.google.com/maps/search/?api=1&query=$cleanCoordinate");
 
     try {
@@ -132,7 +123,6 @@ class _BookingDetailScreenState extends State<BookingDetailScreen> {
     }
   }
 
-  // --- FUNGSI UPDATE STATUS KE BACKEND ---
   Future<void> _updateStatusAPI(String newStatus) async {
     final String bookingId = _data?['id_booking']?.toString() ?? '';
     if (bookingId.isEmpty) {
@@ -144,7 +134,6 @@ class _BookingDetailScreenState extends State<BookingDetailScreen> {
 
     setState(() { _isUpdatingStatus = true; });
     
-    // Panggil API
     final api = ApiService();
     final response = await api.updateBookingStatus(
       idBooking: bookingId, 
@@ -171,7 +160,6 @@ class _BookingDetailScreenState extends State<BookingDetailScreen> {
     }
   }
 
-  // --- FUNGSI OTOMATIS AMBIL LOKASI DAN BUKA KAMERA ---
   Future<void> _captureSelfieAndLocation() async {
     setState(() => _isUpdatingStatus = true); 
 
@@ -225,7 +213,6 @@ class _BookingDetailScreenState extends State<BookingDetailScreen> {
     }
   }
 
-  // --- DIALOG UNTUK PREVIEW FOTO + WATERMARK ---
   void _showArrivalPhotoDialog() {
     showDialog(
       context: context,
@@ -369,7 +356,6 @@ class _BookingDetailScreenState extends State<BookingDetailScreen> {
                       const SizedBox(height: 16),
                       _buildBookingInfoCard(idBooking, idTransaksi, startTime), 
                       const SizedBox(height: 16),
-                      // Pass default alamat untuk diolah di dalam widget lokasi
                       _buildLocationCard(defaultAlamat),
                       const SizedBox(height: 16),
                       _buildServiceCard(layananList), 
@@ -477,7 +463,6 @@ class _BookingDetailScreenState extends State<BookingDetailScreen> {
   }
 
   Widget _buildLocationCard(String defaultAlamat) {
-    // Gunakan alamat lengkap dari API Detail jika ada, jika tidak gunakan default gabungan Gerai & Room.
     final String address = _data?['address']?.toString() ?? defaultAlamat;
     final String catatan = _data?['catatan_alamat']?.toString() ?? _data?['patokan']?.toString() ?? 'Tidak ada catatan alamat/patokan khusus';
     final String coordinate = _data?['coordinate_address']?.toString() ?? '';
@@ -506,7 +491,6 @@ class _BookingDetailScreenState extends State<BookingDetailScreen> {
             ],
           ),
           
-          // --- TOMBOL MAPS MUNCUL JIKA KOORDINAT TERSEDIA DARI API ---
           if (coordinate.isNotEmpty) ...[
             const Padding(
               padding: EdgeInsets.symmetric(vertical: 12),
@@ -534,6 +518,7 @@ class _BookingDetailScreenState extends State<BookingDetailScreen> {
     );
   }
 
+  // --- BAGIAN YANG DIPERBARUI: MENAMPILKAN DURASI LAYANAN ---
   Widget _buildServiceCard(List<dynamic> layananList) {
     return Container(
       padding: const EdgeInsets.all(16),
@@ -545,6 +530,15 @@ class _BookingDetailScreenState extends State<BookingDetailScreen> {
           const SizedBox(height: 12),
           ...layananList.map((item) {
             String name = item is Map ? (item['name'] ?? item['product_name'] ?? 'Layanan') : item.toString();
+            
+            // Ekstrak durasi dari map (Sesuaikan key 'duration' atau 'durasi' dengan response API Anda)
+            String duration = '';
+            if (item is Map) {
+              String rawDuration = (item['duration'] ?? item['durasi'] ?? item['waktu'] ?? '').toString();
+              // Hapus kata 'min', 'mins', atau 'menit' bawaan dari API menggunakan property caseSensitive
+              duration = rawDuration.replaceAll(RegExp(r'minutes|minute|mins|min|menit', caseSensitive: false), '').trim();
+            }
+
             bool isDone = item is Map ? (item['is_done'] == true) : false;
             return Padding(
               padding: const EdgeInsets.only(bottom: 12),
@@ -552,7 +546,23 @@ class _BookingDetailScreenState extends State<BookingDetailScreen> {
                 children: [
                   const Icon(Icons.spa_outlined, color: Colors.pink, size: 20),
                   const SizedBox(width: 12),
-                  Expanded(child: Text(name)),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(name, style: const TextStyle(fontSize: 14)),
+                        // Tampilkan durasi jika ada
+                        if (duration.isNotEmpty && duration != 'null')
+                          Padding(
+                            padding: const EdgeInsets.only(top: 2),
+                            child: Text(
+                              '$duration Menit', 
+                              style: const TextStyle(fontSize: 12, color: Colors.black54)
+                            ),
+                          ),
+                      ],
+                    ),
+                  ),
                   if (isDone) const Icon(Icons.check_circle, color: Colors.green, size: 16),
                 ],
               ),
@@ -586,7 +596,6 @@ class _BookingDetailScreenState extends State<BookingDetailScreen> {
       children: [
         _buildTimelineStep('Pekerjaan di terima', '', true, false),
         _buildTimelineStep('Sudah tiba', '', isArrived, false),
-        // 🔴 Update: Kirim status isSkipped khusus untuk langkah pemeriksaan
         _buildTimelineStep('Cek Kesehatan', '', isPemeriksaan, false, isSkipped: _isPemeriksaanSkipped), 
         _buildTimelineStep('Mulai', '', isStarted, false),
         _buildTimelineStep('Selesai', '', isCompleted, true),
@@ -594,17 +603,16 @@ class _BookingDetailScreenState extends State<BookingDetailScreen> {
     );
   }
 
-  // 🔴 Update: Parameter baru isSkipped untuk menentukan ikon
   Widget _buildTimelineStep(String label, String time, bool done, bool last, {bool isSkipped = false}) {
     IconData icon = Icons.radio_button_unchecked;
     Color color = Colors.grey;
 
     if (done) {
       if (isSkipped) {
-        icon = Icons.cancel; // Tanda Silang (X)
+        icon = Icons.cancel; 
         color = Colors.red;
       } else {
-        icon = Icons.check_circle; // Tanda Ceklis
+        icon = Icons.check_circle; 
         color = Colors.green;
       }
     }
@@ -641,8 +649,8 @@ class _BookingDetailScreenState extends State<BookingDetailScreen> {
           onPressed: _isUpdatingStatus ? null : onPressed,
           style: ElevatedButton.styleFrom(backgroundColor: primaryPink, minimumSize: const Size(double.infinity, 54), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16))),
           child: _isUpdatingStatus 
-              ? const SizedBox(width: 24, height: 24, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
-              : Text(label, style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.white)),
+            ? const SizedBox(width: 24, height: 24, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
+            : Text(label, style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.white)),
         ),
       ),
     );
@@ -653,10 +661,8 @@ class _BookingDetailScreenState extends State<BookingDetailScreen> {
 
     if (s == 'arrived') {
       return _buildSingleActionButton('CEK KESEHATAN KLIEN', () async {
-        // 🔴 Tangkap hasil dari PemeriksaanScreen
         final result = await Navigator.push(context, MaterialPageRoute(builder: (context) => PemeriksaanScreen(bookingData: _data)));
         
-        // Cek apakah hasilnya adalah 'skipped' dari tombol Skip di screen pemeriksaan
         if (result == 'skipped') {
           setState(() {
             _isPemeriksaanSkipped = true;
@@ -678,7 +684,6 @@ class _BookingDetailScreenState extends State<BookingDetailScreen> {
           final result = await Navigator.pushNamed(context, '/active_job', arguments: _data);
           
           if (result != null && result is Map && result['action'] == 'finish_treatment') {
-             // UPDATE: Pindah langsung ke layar laporan saat kembali dari timer
              setState(() {
                _currentStatus = 'Closed';
                _data?['booking_status'] = 'Closed';
@@ -697,7 +702,6 @@ class _BookingDetailScreenState extends State<BookingDetailScreen> {
         final List<dynamic> treatments = _data?['treatments'] ?? [];
         final String idTransaksi = _data?['id_transaksi']?.toString() ?? '';
 
-        // 1. Tembak API Finish untuk SEMUA layanan agar is_done menjadi true
         for (var item in treatments) {
           bool alreadyDone = item is Map && item['is_done'] == true;
           if (!alreadyDone) {
@@ -718,12 +722,10 @@ class _BookingDetailScreenState extends State<BookingDetailScreen> {
           }
         }
 
-        // 2. Tutup status booking utamanya
         await _updateStatusAPI('Closed');
         
         setState(() { _isUpdatingStatus = false; });
         
-        // 3. Pindah ke halaman laporan
         if (mounted) Navigator.pushReplacementNamed(context, '/visit_report', arguments: _data);
       });
     }
@@ -736,7 +738,6 @@ class _BookingDetailScreenState extends State<BookingDetailScreen> {
         final List<dynamic> treatments = _data?['treatments'] ?? [];
         final String idTransaksi = _data?['id_transaksi']?.toString() ?? '';
 
-        // PASTIKAN SEMUA TREATMENT DI-FINISH (Sapu bersih jika status telanjur Closed tapi is_done masih false)
         for (var item in treatments) {
           bool alreadyDone = item is Map && item['is_done'] == true;
           if (!alreadyDone) {
@@ -762,7 +763,6 @@ class _BookingDetailScreenState extends State<BookingDetailScreen> {
       });
     }
 
-    // Default: Status Accepted / Open
     return Container(
       padding: const EdgeInsets.all(20),
       decoration: const BoxDecoration(color: Colors.white, boxShadow: [BoxShadow(color: Colors.black12, blurRadius: 10, offset: Offset(0, -2))]),
