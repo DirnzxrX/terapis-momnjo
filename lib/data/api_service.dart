@@ -12,6 +12,18 @@ class ApiService {
     return prefs.getString('jwt_token');
   }
 
+  // --- HELPER: MENGAMBIL COOKIE SESSION DARI LOKAL ---
+  Future<String?> _getCookie() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getString('session_cookie');
+  }
+
+  // --- HELPER: MENGECEK STATUS LOGIN ---
+  Future<bool> isLoggedIn() async {
+    final String? token = await _getToken();
+    return token != null && token.isNotEmpty;
+  }
+
   // --- HELPER: FUNGSI MATA-MATA (DEBUG LOG) KE TERMINAL ---
   void _logDebug({
     required String url,
@@ -37,6 +49,7 @@ class ApiService {
   // =========================================================================
   Future<Map<String, dynamic>> getJobs({String? status, String? search}) async {
     final String? token = await _getToken();
+    final String? cookie = await _getCookie(); // Ambil cookie
     if (token == null) return {'success': false, 'message': 'Unauthorized. Token tidak ditemukan.'};
 
     final Map<String, String> queryParams = {};
@@ -52,7 +65,8 @@ class ApiService {
         headers: {
           'Content-Type': 'application/json',
           'Accept': 'application/json',
-          'Authorization': 'Bearer $token'
+          'Authorization': 'Bearer $token',
+          if (cookie != null) 'Cookie': cookie, // Sisipkan cookie jika ada
         },
       );
 
@@ -89,6 +103,7 @@ class ApiService {
   // =========================================================================
   Future<Map<String, dynamic>> getJobDetail(String idTransaksi) async {
     final String? token = await _getToken();
+    final String? cookie = await _getCookie();
     if (token == null) return {'success': false, 'message': 'Token tidak ditemukan'};
 
     if (idTransaksi.trim().isEmpty) {
@@ -104,6 +119,7 @@ class ApiService {
           'Content-Type': 'application/json',
           'Accept': 'application/json',
           'Authorization': 'Bearer $token',
+          if (cookie != null) 'Cookie': cookie,
         },
       );
 
@@ -139,6 +155,7 @@ class ApiService {
     String? imagePath,
   }) async {
     final String? token = await _getToken();
+    final String? cookie = await _getCookie();
     if (token == null) return {'success': false, 'message': 'Token tidak ditemukan'};
 
     final String url = '$baseUrl/api_terapis/update_service.php';
@@ -155,6 +172,7 @@ class ApiService {
         var request = http.MultipartRequest('POST', Uri.parse(url));
         request.headers['Authorization'] = 'Bearer $token';
         request.headers['Accept'] = 'application/json';
+        if (cookie != null) request.headers['Cookie'] = cookie; // Sisipkan cookie untuk multipart
 
         request.fields['id_transaksi'] = idTransaksi;
         // 🔥 PROTEKSI GANDA: Kirim id_booking juga jika API bingung format MNJ...
@@ -187,6 +205,7 @@ class ApiService {
             'Content-Type': 'application/json',
             'Accept': 'application/json',
             'Authorization': 'Bearer $token',
+            if (cookie != null) 'Cookie': cookie,
           },
           body: json.encode(body),
         );
@@ -225,6 +244,7 @@ class ApiService {
   // =========================================================================
   Future<Map<String, dynamic>> getStats() async {
     final String? token = await _getToken();
+    final String? cookie = await _getCookie();
     if (token == null) return {'success': false, 'message': 'Token tidak ditemukan'};
 
     final String url = '$baseUrl/api_terapis/get_stats.php';
@@ -235,7 +255,8 @@ class ApiService {
         headers: {
           'Content-Type': 'application/json',
           'Accept': 'application/json',
-          'Authorization': 'Bearer $token'
+          'Authorization': 'Bearer $token',
+          if (cookie != null) 'Cookie': cookie,
         },
       );
 
@@ -263,6 +284,7 @@ class ApiService {
     String? imagePath,
   }) async {
     final String? token = await _getToken();
+    final String? cookie = await _getCookie();
     if (token == null) return {'success': false, 'message': 'Token tidak ditemukan'};
 
     // 🔥 DIKEMBALIKAN KE ENDPOINT ASLI (update_booking_status.php)
@@ -276,6 +298,7 @@ class ApiService {
         var request = http.MultipartRequest('POST', Uri.parse(url));
         request.headers['Authorization'] = 'Bearer $token';
         request.headers['Accept'] = 'application/json';
+        if (cookie != null) request.headers['Cookie'] = cookie;
         
         request.fields['id_booking'] = idBooking; 
         request.fields['status'] = newStatus;
@@ -298,6 +321,7 @@ class ApiService {
             'Content-Type': 'application/json',
             'Accept': 'application/json',
             'Authorization': 'Bearer $token',
+            if (cookie != null) 'Cookie': cookie,
           },
           body: json.encode(body),
         );
@@ -338,6 +362,7 @@ class ApiService {
     String? catatan,
   }) async {
     final String? token = await _getToken();
+    final String? cookie = await _getCookie();
     if (token == null) return {'success': false, 'message': 'Token tidak ditemukan'};
 
     if (idTransaksi.trim().isEmpty || idCustomer.trim().isEmpty) {
@@ -369,6 +394,7 @@ class ApiService {
           'Content-Type': 'application/json',
           'Accept': 'application/json',
           'Authorization': 'Bearer $token',
+          if (cookie != null) 'Cookie': cookie,
         },
         body: json.encode(payloadData),
       );
@@ -402,6 +428,7 @@ class ApiService {
   // =========================================================================
   Future<Map<String, dynamic>> getHistoryDetail(String idTransaksi) async {
     final String? token = await _getToken();
+    final String? cookie = await _getCookie();
     if (token == null) return {'success': false, 'message': 'Token tidak ditemukan'};
 
     final String url = '$baseUrl/api_terapis/history_detail.php?id_transaksi=$idTransaksi';
@@ -413,6 +440,7 @@ class ApiService {
           'Content-Type': 'application/json',
           'Accept': 'application/json',
           'Authorization': 'Bearer $token',
+          if (cookie != null) 'Cookie': cookie,
         },
       );
 
@@ -443,6 +471,7 @@ class ApiService {
     required String notes,
   }) async {
     final String? token = await _getToken();
+    final String? cookie = await _getCookie();
     if (token == null) return {'success': false, 'message': 'Token tidak ditemukan'};
 
     final String url = '$baseUrl/api_terapis/update_service.php';
@@ -463,6 +492,7 @@ class ApiService {
           'Content-Type': 'application/json',
           'Accept': 'application/json',
           'Authorization': 'Bearer $token',
+          if (cookie != null) 'Cookie': cookie,
         },
         body: json.encode(body),
       );
@@ -485,7 +515,7 @@ class ApiService {
   }
 
   // =========================================================================
-  // LOGIN
+  // LOGIN (MENDUKUNG PENYIMPANAN COOKIE SESSION)
   // =========================================================================
   Future<Map<String, dynamic>> login(String username, String password) async {
     final String url = '$baseUrl/api_terapis/login.php';
@@ -506,21 +536,44 @@ class ApiService {
 
       _logDebug(url: url, method: "POST", requestBody: body, statusCode: response.statusCode, responseBody: response.body);
 
-      if (response.statusCode == 200 || response.statusCode == 400 || response.statusCode == 401) {
+      if (response.statusCode == 200 || response.statusCode == 201) {
         final responseData = json.decode(response.body);
 
-        if (responseData['success'] == true && responseData['data'] != null) {
-          final prefs = await SharedPreferences.getInstance();
-          final data = responseData['data'];
+        // 🔥 PERBAIKAN: Mengecek success dengan sangat longgar
+        bool isSuccess = responseData['success'] == true || 
+                         responseData['success'] == 'true' || 
+                         responseData['status'] == 'success';
 
-          if (data['token'] != null) await prefs.setString('jwt_token', data['token']);
-          if (data['nama_lengkap'] != null) await prefs.setString('nama_lengkap', data['nama_lengkap']);
+        if (isSuccess) {
+          final prefs = await SharedPreferences.getInstance();
+          // Cari objek data, kalau API mengirim di root ya pakai root (responseData)
+          final data = responseData['data'] ?? responseData;
+
+          // Ekstrak token (cek berbagai macam key standar)
+          final String? tokenToSave = data['token'] ?? data['jwt'] ?? responseData['token'];
+          
+          if (tokenToSave != null && tokenToSave.isNotEmpty) {
+            await prefs.setString('jwt_token', tokenToSave);
+            debugPrint("✅ API LOG: Token berhasil disimpan ke SharedPreferences.");
+          }
+
+          // Ekstrak nama
+          final String? namaToSave = data['nama_lengkap'] ?? data['name'] ?? responseData['nama_lengkap'];
+          if (namaToSave != null) {
+            await prefs.setString('nama_lengkap', namaToSave);
+          }
+          
+          // 🔥 SIMPAN COOKIE SESSION DARI HEADER JIKA DIBERIKAN OLEH SERVER
+          final String? rawCookie = response.headers['set-cookie'];
+          if (rawCookie != null) {
+            await prefs.setString('session_cookie', rawCookie);
+          }
         }
         return responseData;
       }
-      return {'success': false, 'message': 'Gagal terhubung ke server.'};
+      return {'success': false, 'message': 'Gagal terhubung ke server (Status: ${response.statusCode}).'};
     } catch (e) {
-      return {'success': false, 'message': 'Terjadi kesalahan jaringan atau sistem.'};
+      return {'success': false, 'message': 'Terjadi kesalahan jaringan atau sistem: $e'};
     }
   }
 
@@ -532,6 +585,7 @@ class ApiService {
     
     final String? savedAttendance = prefs.getString('attendance_history');
     
+    // Ini otomatis akan menghapus 'jwt_token' dan 'session_cookie'
     await prefs.clear(); 
     
     if (savedAttendance != null) {
@@ -550,6 +604,7 @@ class ApiService {
     String? endDate,
   }) async {
     final String? token = await _getToken();
+    final String? cookie = await _getCookie();
     if (token == null) return {'success': false, 'message': 'Token tidak ditemukan'};
 
     final Map<String, String> queryParams = {};
@@ -567,6 +622,7 @@ class ApiService {
           'Content-Type': 'application/json',
           'Accept': 'application/json',
           'Authorization': 'Bearer $token',
+          if (cookie != null) 'Cookie': cookie,
         },
       );
 
@@ -610,6 +666,7 @@ class ApiService {
     String? notes,
   }) async {
     final String? token = await _getToken();
+    final String? cookie = await _getCookie();
     if (token == null) return {'success': false, 'message': 'Token tidak ditemukan'};
 
     final String url = '$baseUrl/api_terapis/request_payout.php';
@@ -630,6 +687,7 @@ class ApiService {
           'Content-Type': 'application/json',
           'Accept': 'application/json',
           'Authorization': 'Bearer $token',
+          if (cookie != null) 'Cookie': cookie,
         },
         body: json.encode(body),
       );
@@ -664,6 +722,7 @@ class ApiService {
     String? endDate,
   }) async {
     final String? token = await _getToken();
+    final String? cookie = await _getCookie();
     if (token == null) return {'success': false, 'message': 'Token tidak ditemukan'};
 
     final Map<String, String> queryParams = {};
@@ -681,6 +740,7 @@ class ApiService {
           'Content-Type': 'application/json',
           'Accept': 'application/json',
           'Authorization': 'Bearer $token',
+          if (cookie != null) 'Cookie': cookie,
         },
       );
 
@@ -717,6 +777,7 @@ class ApiService {
   // =========================================================================
   Future<Map<String, dynamic>> getPayoutDetail(int idPayout) async {
     final String? token = await _getToken();
+    final String? cookie = await _getCookie();
     if (token == null) return {'success': false, 'message': 'Token tidak ditemukan'};
 
     final String url = '$baseUrl/api_terapis/get_detail_payout.php?id_payout=$idPayout';
@@ -728,6 +789,7 @@ class ApiService {
           'Content-Type': 'application/json',
           'Accept': 'application/json',
           'Authorization': 'Bearer $token',
+          if (cookie != null) 'Cookie': cookie,
         },
       );
 
@@ -756,6 +818,7 @@ class ApiService {
   // =========================================================================
   Future<Map<String, dynamic>> getProfile() async {
     final String? token = await _getToken();
+    final String? cookie = await _getCookie();
     if (token == null) return {'success': false, 'message': 'Token tidak ditemukan'};
 
     final String url = '$baseUrl/api_terapis/get_profile.php';
@@ -767,6 +830,7 @@ class ApiService {
           'Content-Type': 'application/json',
           'Accept': 'application/json',
           'Authorization': 'Bearer $token',
+          if (cookie != null) 'Cookie': cookie,
         },
       );
 
@@ -795,6 +859,7 @@ class ApiService {
   // =========================================================================
   Future<Map<String, dynamic>> getDataDiri() async {
     final String? token = await _getToken();
+    final String? cookie = await _getCookie();
     if (token == null) return {'success': false, 'message': 'Token tidak ditemukan'};
 
     final String url = '$baseUrl/api_terapis/get_data_diri.php';
@@ -806,6 +871,7 @@ class ApiService {
           'Content-Type': 'application/json',
           'Accept': 'application/json',
           'Authorization': 'Bearer $token',
+          if (cookie != null) 'Cookie': cookie,
         },
       );
 
@@ -834,6 +900,7 @@ class ApiService {
   // =========================================================================
   Future<Map<String, dynamic>> getCarousel() async {
     final String url = '$baseUrl/api_terapis/get_carousel.php';
+    final String? cookie = await _getCookie();
 
     try {
       final response = await http.get(
@@ -841,7 +908,7 @@ class ApiService {
         headers: {
           'Content-Type': 'application/json',
           'Accept': 'application/json',
-          // Tidak memerlukan Authorization sesuai spesifikasi backend
+          if (cookie != null) 'Cookie': cookie,
         },
       );
 
@@ -881,6 +948,7 @@ class ApiService {
   // =========================================================================
   Future<Map<String, dynamic>> checkAttendanceStatus() async {
     final String? token = await _getToken();
+    final String? cookie = await _getCookie();
     if (token == null) return {'success': false, 'message': 'Token tidak ditemukan'};
 
     final String url = '$baseUrl/api_terapis/store_absensi.php';
@@ -892,6 +960,7 @@ class ApiService {
           'Content-Type': 'application/json',
           'Accept': 'application/json',
           'Authorization': 'Bearer $token',
+          if (cookie != null) 'Cookie': cookie,
         },
       );
 
@@ -925,6 +994,7 @@ class ApiService {
     String? lokasi,
   }) async {
     final String? token = await _getToken();
+    final String? cookie = await _getCookie();
     if (token == null) return {'success': false, 'message': 'Token tidak ditemukan'};
 
     final String url = '$baseUrl/api_terapis/store_absensi.php';
@@ -937,6 +1007,7 @@ class ApiService {
         var request = http.MultipartRequest('POST', Uri.parse(url));
         request.headers['Authorization'] = 'Bearer $token';
         request.headers['Accept'] = 'application/json';
+        if (cookie != null) request.headers['Cookie'] = cookie;
 
         request.fields['action'] = action;
         if (catatan != null && catatan.isNotEmpty) request.fields['catatan'] = catatan;
@@ -968,6 +1039,7 @@ class ApiService {
             'Content-Type': 'application/json',
             'Accept': 'application/json',
             'Authorization': 'Bearer $token',
+            if (cookie != null) 'Cookie': cookie,
           },
           body: json.encode(body),
         );
@@ -1005,6 +1077,7 @@ class ApiService {
   // =========================================================================
   Future<Map<String, dynamic>> getAttendanceHistory({String? bulan, String? tahun}) async {
     final String? token = await _getToken();
+    final String? cookie = await _getCookie();
     if (token == null) return {'success': false, 'message': 'Token tidak ditemukan'};
 
     final Map<String, String> queryParams = {};
@@ -1021,6 +1094,7 @@ class ApiService {
           'Content-Type': 'application/json',
           'Accept': 'application/json',
           'Authorization': 'Bearer $token',
+          if (cookie != null) 'Cookie': cookie,
         },
       );
 

@@ -19,7 +19,6 @@ class _PemeriksaanScreenState extends State<PemeriksaanScreen> {
   final Color buttonColor = const Color(0xFF97463C);
 
   final TextEditingController _suhuController = TextEditingController();
-  final TextEditingController _tinggiController = TextEditingController();
   final TextEditingController _beratController = TextEditingController();
   final TextEditingController _sistolikController = TextEditingController();
   final TextEditingController _diastolikController = TextEditingController();
@@ -38,7 +37,6 @@ class _PemeriksaanScreenState extends State<PemeriksaanScreen> {
   @override
   void dispose() {
     _suhuController.dispose(); 
-    _tinggiController.dispose(); 
     _beratController.dispose();
     _sistolikController.dispose(); 
     _diastolikController.dispose(); 
@@ -49,16 +47,15 @@ class _PemeriksaanScreenState extends State<PemeriksaanScreen> {
 
   Future<void> _submitData() async {
     final suhu = _suhuController.text.trim();
-    final tinggi = _tinggiController.text.trim();
     final berat = _beratController.text.trim();
     final sistolik = _sistolikController.text.trim();
     final diastolik = _diastolikController.text.trim();
     final catatan = _catatanController.text.trim();
 
-    // Validasi dasar
-    if (suhu.isEmpty || tinggi.isEmpty || berat.isEmpty) {
+    // Validasi dasar (Hanya Suhu dan Berat yang wajib)
+    if (suhu.isEmpty || berat.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Suhu, Tinggi, dan Berat tidak boleh kosong!'), backgroundColor: Colors.redAccent)
+        const SnackBar(content: Text('Suhu dan Berat tidak boleh kosong!'), backgroundColor: Colors.redAccent)
       );
       return;
     }
@@ -91,7 +88,7 @@ class _PemeriksaanScreenState extends State<PemeriksaanScreen> {
         idTransaksi: idTransaksi,
         idCustomer: idCustomer,
         suhu: suhu, 
-        tinggi: tinggi, 
+        tinggi: '', // Kosongkan agar tidak error di ApiService jika ada kewajiban parameter
         berat: berat,
         sistolik: sistolik, 
         diastolik: diastolik,
@@ -244,15 +241,7 @@ class _PemeriksaanScreenState extends State<PemeriksaanScreen> {
             children: [
               Expanded(child: _buildInputField('Suhu', '°C', _suhuController, isDecimal: true)), 
               const SizedBox(width: 16), 
-              Expanded(child: _buildInputField('Tinggi', 'cm', _tinggiController))
-            ]
-          ),
-          const SizedBox(height: 16),
-          Row(
-            children: [
-              Expanded(child: _buildInputField('Berat', 'kg', _beratController, isDecimal: true)), 
-              const SizedBox(width: 16), 
-              const Expanded(child: SizedBox())
+              Expanded(child: _buildInputField('Berat', 'kg', _beratController, isDecimal: true))
             ]
           ),
           const SizedBox(height: 24),

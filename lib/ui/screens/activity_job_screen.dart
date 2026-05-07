@@ -346,7 +346,7 @@ class _ActivityScreenState extends State<ActivityScreen> {
 
     int avatarIndex = (customerName.length * 3) % 70;
     final String avatarUrl = data['customer_avatar'] ?? data['avatar'] ?? data['foto'] ?? 'https://i.pravatar.cc/150?img=$avatarIndex';
-
+ 
     final Map<String, dynamic> safeData = Map<String, dynamic>.from(data);
 
     return Container(

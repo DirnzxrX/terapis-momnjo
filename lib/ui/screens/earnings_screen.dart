@@ -17,12 +17,12 @@ class _EarningsScreenState extends State<EarningsScreen> {
   String _selectedTab = 'Treatment'; 
   bool _isLoading = true;
 
-  // --- VARIABEL KOTAK PINK DARI API SEBAGAI FALLBACK ---
+  // --- VARIABEL TOTAL DARI API SEBAGAI SOURCE OF TRUTH ---
   double _totalKomisiAllTime = 0;
   double _komisiTreatmentAllTime = 0;
   double _komisiPaketAllTime = 0;
 
-  // --- VARIABEL OMSET API SEBAGAI FALLBACK ---
+  // --- VARIABEL OMSET DARI API SEBAGAI SOURCE OF TRUTH ---
   double _pendapatanKotorTreatment = 0;
   double _totalPenjualanPaket = 0;
   
@@ -111,20 +111,23 @@ class _EarningsScreenState extends State<EarningsScreen> {
         data = response['data'] ?? {};
       }
 
-      setState(() {
-        _totalKomisiAllTime = _parseDouble(data['total_balance_keseluruhan'] ?? data['total_balance']);
-        
-        final Map<String, dynamic> tData = data['treatment'] ?? {};
-        final Map<String, dynamic> pData = data['paket'] ?? {};
-        
-        _komisiTreatmentAllTime = _parseDouble(tData['total_balance_treatment'] ?? tData['komisi_treatment']);
-        _komisiPaketAllTime = _parseDouble(pData['total_balance_paket'] ?? pData['komisi_paket_bersih']);
-        
-        _pendapatanKotorTreatment = _parseDouble(tData['pendapatan_sebelum_diskon'] ?? tData['total_omset']);
-        _totalPenjualanPaket = _parseDouble(pData['harga_paket'] ?? pData['total_omset']);
-        
-        _isLoading = false;
-      });
+      if (mounted) {
+        setState(() {
+          final Map<String, dynamic> tData = data['treatment'] ?? {};
+          final Map<String, dynamic> pData = data['paket'] ?? {};
+          
+          // Omset
+          _pendapatanKotorTreatment = _parseDouble(tData['total_omset_treatment'] ?? tData['pendapatan_sebelum_diskon'] ?? tData['total_omset']);
+          _totalPenjualanPaket = _parseDouble(pData['total_omset_paket'] ?? pData['harga_paket'] ?? pData['total_omset']);
+          
+          // Komisi
+          _komisiTreatmentAllTime = _parseDouble(tData['total_komisi_treatment'] ?? tData['komisi_treatment'] ?? tData['total_komisi'] ?? tData['total_balance_treatment']);
+          _komisiPaketAllTime = _parseDouble(pData['total_komisi_paket'] ?? pData['komisi_paket_bersih'] ?? pData['total_komisi'] ?? pData['total_balance_paket']);
+          _totalKomisiAllTime = _parseDouble(data['total_komisi_keseluruhan'] ?? data['total_komisi'] ?? data['total_balance_keseluruhan'] ?? data['total_balance']);
+          
+          _isLoading = false;
+        });
+      }
     } catch (e) {
       _showError('Terjadi kesalahan jaringan atau sistem.');
       debugPrint('Exception: $e');
@@ -331,58 +334,44 @@ class _EarningsScreenState extends State<EarningsScreen> {
   }
 
   Widget _buildEarningsCard() {
-    double computedKomisiTreatment = 0;
-    double computedOmsetTreatment = 0;
-    
-    final filteredTreatment = _filterListByDate(_rincianTreatment, 'tgl_dokumen');
-    for (var item in filteredTreatment) {
-      double omset = _parseDouble(item['pendapatan_sebelum_diskon']);
-      double komisi = _parseDouble(item['komisi']);
-      if (komisi <= 0 && omset > 0) komisi = omset * 0.05; 
-      
-      computedOmsetTreatment += omset;
-      computedKomisiTreatment += komisi;
-    }
-
-    double computedKomisiPaket = 0;
-    double computedOmsetPaket = 0;
-    
-    final filteredPaket = _filterListByDate(_rincianPaket, 'tgl_transaksi', fallbackKey: 'tgl_dokumen');
-    for (var item in filteredPaket) {
-      bool isOverrideDeduction = item.containsKey('overriding_terapis') && item.containsKey('potongan_komisi');
-      
-      if (isOverrideDeduction) {
-        double potongan = _parseDouble(item['potongan_komisi']);
-        computedKomisiPaket -= potongan;
-      } else {
-        double omset = _parseDouble(item['harga_paket']);
-        double komisiKotor = _parseDouble(item['komisi_paket_kotor'] ?? item['komisi_kotor'] ?? item['komisi']);
-        double override = _parseDouble(item['potongan_override'] ?? item['potongan_komisi']);
-        double komisiBersih = _parseDouble(item['komisi_paket_bersih'] ?? item['komisi_bersih'] ?? item['komisi']);
-        
-        if (komisiKotor <= 0 && omset > 0) {
-          komisiKotor = omset * 0.05;
-          komisiBersih = komisiKotor - override;
-        }
-        
-        computedOmsetPaket += omset;
-        computedKomisiPaket += komisiBersih;
-      }
-    }
-
     String mainTitle = _selectedTab == 'Treatment' ? 'Total Komisi Treatment' : 'Total Komisi Paket';
     String subTitle = _selectedTab == 'Treatment' ? 'Total Omset Keseluruhan' : 'Total Penjualan Paket';
     
-    double mainAmount = _selectedTab == 'Treatment' ? computedKomisiTreatment : computedKomisiPaket;
-    double omsetAmount = _selectedTab == 'Treatment' ? computedOmsetTreatment : computedOmsetPaket;
-
-    if (_selectedTab == 'Treatment' && filteredTreatment.isEmpty) {
-      mainAmount = _komisiTreatmentAllTime;
-      omsetAmount = _pendapatanKotorTreatment;
-    } else if (_selectedTab == 'Paket' && filteredPaket.isEmpty) {
-      mainAmount = _komisiPaketAllTime;
-      omsetAmount = _totalPenjualanPaket;
+    // --- PRE-CALCULATE UNTUK TREATMENT ---
+    double calcTreatmentKomisi = _komisiTreatmentAllTime;
+    double calcTreatmentOmset = _pendapatanKotorTreatment;
+    if (calcTreatmentKomisi < (calcTreatmentOmset * 0.04)) {
+      double sumKomisi = 0;
+      for (var item in _rincianTreatment) {
+        double o = _parseDouble(item['pendapatan_sebelum_diskon'] ?? item['harga'] ?? item['total_omset']);
+        double k = _parseDouble(item['komisi_treatment'] ?? item['komisi_terapis'] ?? item['komisi_kotor'] ?? item['komisi_bersih'] ?? item['komisi']);
+        if (k <= 0 && o > 0) k = o * 0.05; 
+        sumKomisi += k;
+      }
+      if (sumKomisi > 0) calcTreatmentKomisi = sumKomisi;
     }
+
+    // --- PRE-CALCULATE UNTUK PAKET ---
+    double calcPaketKomisi = _komisiPaketAllTime;
+    double calcPaketOmset = _totalPenjualanPaket;
+    if (calcPaketKomisi < (calcPaketOmset * 0.04)) {
+      double sumKomisi = 0;
+      for (var item in _rincianPaket) {
+        bool isOverrideDeduction = item.containsKey('overriding_terapis') && item.containsKey('potongan_komisi');
+        if (isOverrideDeduction) {
+          sumKomisi -= _parseDouble(item['potongan_komisi']);
+        } else {
+          double o = _parseDouble(item['harga_paket'] ?? item['harga'] ?? item['omset']);
+          double k = _parseDouble(item['komisi_paket_bersih'] ?? item['komisi_bersih'] ?? item['komisi_terapis'] ?? item['komisi']);
+          if (k <= 0 && o > 0) k = o * 0.05; 
+          sumKomisi += k;
+        }
+      }
+      if (sumKomisi > 0) calcPaketKomisi = sumKomisi;
+    }
+
+    double mainAmount = _selectedTab == 'Treatment' ? calcTreatmentKomisi : calcPaketKomisi;
+    double omsetAmount = _selectedTab == 'Treatment' ? calcTreatmentOmset : calcPaketOmset;
 
     return Container(
       key: ValueKey('EarningsCard_$_selectedTab'),
@@ -409,10 +398,25 @@ class _EarningsScreenState extends State<EarningsScreen> {
                   width: double.infinity,
                   child: ElevatedButton(
                     onPressed: () async {
+                      // Ambil Filter Tanggal
+                      String? startStr;
+                      String? endStr;
+                      if (_selectedDateRange != null) {
+                        startStr = DateFormat('yyyy-MM-dd').format(_selectedDateRange!.start);
+                        endStr = DateFormat('yyyy-MM-dd').format(_selectedDateRange!.end);
+                      }
+
                       final result = await Navigator.pushNamed(
                         context, 
                         '/request_payout',
-                        arguments: _selectedTab.toLowerCase(), 
+                        arguments: {
+                          'tab': _selectedTab.toLowerCase(),
+                          'startDate': startStr,
+                          'endDate': endStr,
+                          // 🔥 KIRIM ANGKA YANG SUDAH DIHITUNG PERSIS KE REQUEST PAYOUT
+                          'saldoTreatment': calcTreatmentKomisi, 
+                          'saldoPaket': calcPaketKomisi,
+                        }, 
                       );
                       
                       if (result == true) {
@@ -454,38 +458,32 @@ class _EarningsScreenState extends State<EarningsScreen> {
   }
 
   Widget _buildPayoutCard() {
-    double totalKeseluruhan = 0;
-    
-    final filteredTreatment = _filterListByDate(_rincianTreatment, 'tgl_dokumen');
-    for (var item in filteredTreatment) {
-      double omset = _parseDouble(item['pendapatan_sebelum_diskon']);
-      double komisi = _parseDouble(item['komisi']);
-      if (komisi <= 0 && omset > 0) komisi = omset * 0.05;
-      totalKeseluruhan += komisi;
-    }
+    double totalKeseluruhan = _totalKomisiAllTime;
 
-    final filteredPaket = _filterListByDate(_rincianPaket, 'tgl_transaksi', fallbackKey: 'tgl_dokumen');
-    for (var item in filteredPaket) {
-      bool isOverrideDeduction = item.containsKey('overriding_terapis') && item.containsKey('potongan_komisi');
-      
-      if (isOverrideDeduction) {
-        double potongan = _parseDouble(item['potongan_komisi']);
-        totalKeseluruhan -= potongan;
-      } else {
-        double omset = _parseDouble(item['harga_paket']);
-        double komisiKotor = _parseDouble(item['komisi_paket_kotor'] ?? item['komisi_kotor'] ?? item['komisi']);
-        double override = _parseDouble(item['potongan_override'] ?? item['potongan_komisi']);
-        double komisiBersih = _parseDouble(item['komisi_paket_bersih'] ?? item['komisi_bersih'] ?? item['komisi']);
-        if (komisiKotor <= 0 && omset > 0) {
-          komisiKotor = omset * 0.05;
-          komisiBersih = komisiKotor - override;
-        }
-        totalKeseluruhan += komisiBersih;
+    // Sinkronisasi jika nilai Total Komisi Keseluruhan 0 atau tidak wajar
+    if (totalKeseluruhan <= 0 || totalKeseluruhan < ((_pendapatanKotorTreatment + _totalPenjualanPaket) * 0.04)) {
+      double sumT = 0;
+      for (var item in _rincianTreatment) {
+         double o = _parseDouble(item['pendapatan_sebelum_diskon'] ?? item['harga'] ?? item['total_omset']);
+         double k = _parseDouble(item['komisi_treatment'] ?? item['komisi_terapis'] ?? item['komisi']);
+         if (k <= 0 && o > 0) k = o * 0.05;
+         sumT += k;
       }
-    }
+      
+      double sumP = 0;
+      for (var item in _rincianPaket) {
+        bool isOverrideDeduction = item.containsKey('overriding_terapis') && item.containsKey('potongan_komisi');
+        if (isOverrideDeduction) {
+          sumP -= _parseDouble(item['potongan_komisi']);
+        } else {
+          double o = _parseDouble(item['harga_paket'] ?? item['harga'] ?? item['omset']);
+          double k = _parseDouble(item['komisi_paket_bersih'] ?? item['komisi_bersih'] ?? item['komisi_terapis'] ?? item['komisi']);
+          if (k <= 0 && o > 0) k = o * 0.05;
+          sumP += k;
+        }
+      }
 
-    if (filteredTreatment.isEmpty && filteredPaket.isEmpty) {
-       totalKeseluruhan = _totalKomisiAllTime;
+      if ((sumT + sumP) > 0) totalKeseluruhan = sumT + sumP;
     }
 
     return Container(
@@ -599,11 +597,13 @@ class _EarningsScreenState extends State<EarningsScreen> {
         final namaTreatment = item['product_name'] ?? 'Treatment Tidak Diketahui';
         final qty = item['quantity'] ?? 1;
         
-        final pendapatanKotorItem = _parseDouble(item['pendapatan_sebelum_diskon']);
-        double komisiItem = _parseDouble(item['komisi']);
-
+        final pendapatanKotorItem = _parseDouble(item['pendapatan_sebelum_diskon'] ?? item['harga'] ?? item['total_omset']);
+        
+        // Coba semua key komisi dari API, jika masih 0, hitung otomatis 5% dari omset
+        double komisiItem = _parseDouble(item['komisi_treatment'] ?? item['komisi_terapis'] ?? item['komisi_kotor'] ?? item['komisi_bersih'] ?? item['komisi']);
+        
         if (komisiItem <= 0 && pendapatanKotorItem > 0) {
-          komisiItem = pendapatanKotorItem * 0.05;
+          komisiItem = pendapatanKotorItem * 0.05; // Set 5% agar list memiliki nilai 
         }
         
         String timestamp = item['created_at'] ?? item['tgl_dokumen'] ?? '';
@@ -688,7 +688,7 @@ class _EarningsScreenState extends State<EarningsScreen> {
       itemBuilder: (context, index) {
         final item = listToDisplay[index];
         
-        // 🔥 PERBAIKAN: Pencarian nama paket secara AGRESIF ANTI "POTONGAN" & "OVERRIDE"
+        // PERBAIKAN: Pencarian nama paket secara AGRESIF ANTI "POTONGAN" & "OVERRIDE"
         String namaPaket = '';
         final keysToTry = [
           'package_custom_name', 'nama_paket_asli', 'nama_paket', 'package_name', 
@@ -793,14 +793,11 @@ class _EarningsScreenState extends State<EarningsScreen> {
           // =========================================================================
           // RENDER UI STANDAR: PAKET BIASA
           // =========================================================================
-          final hargaPaket = _parseDouble(item['harga_paket']);
-          double komisiKotor = _parseDouble(item['komisi_paket_kotor'] ?? item['komisi_kotor'] ?? item['komisi']);
-          double potonganOverride = _parseDouble(item['potongan_override'] ?? item['potongan_komisi']);
-          double komisiBersih = _parseDouble(item['komisi_paket_bersih'] ?? item['komisi_bersih'] ?? item['komisi']);
-
-          if (komisiKotor <= 0 && hargaPaket > 0) {
-            komisiKotor = hargaPaket * 0.05;
-            komisiBersih = komisiKotor - potonganOverride;
+          final hargaPaket = _parseDouble(item['harga_paket'] ?? item['harga'] ?? item['omset']);
+          
+          double komisiBersih = _parseDouble(item['komisi_paket_bersih'] ?? item['komisi_bersih'] ?? item['komisi_terapis'] ?? item['komisi']);
+          if (komisiBersih <= 0 && hargaPaket > 0) {
+            komisiBersih = hargaPaket * 0.05;
           }
 
           String timestamp = item['created_at'] ?? item['tgl_transaksi'] ?? item['tgl_dokumen'] ?? '';

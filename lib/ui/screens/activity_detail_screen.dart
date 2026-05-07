@@ -17,6 +17,7 @@ class _ActivityDetailScreenState extends State<ActivityDetailScreen> {
 
   String _idTransaksi = '';
   Map<String, dynamic>? _detailData;
+  Map<String, dynamic>? _argsData; // Menyimpan data murni dari Job Aktif
   bool _isLoadingDetail = true;
   bool _isSubmittingRating = false;
   String? _errorMessage;
@@ -30,6 +31,7 @@ class _ActivityDetailScreenState extends State<ActivityDetailScreen> {
     if (_idTransaksi.isEmpty) {
       final args = ModalRoute.of(context)?.settings.arguments as Map<String, dynamic>?;
       if (args != null) {
+        _argsData = args; // Simpan data dari layar sebelumnya untuk ekstrak durasi asli
         _idTransaksi = args['id_transaksi']?.toString() ?? args['id_booking']?.toString() ?? '';
         if (_idTransaksi.isNotEmpty) {
           _fetchDetail();
@@ -379,12 +381,11 @@ class _ActivityDetailScreenState extends State<ActivityDetailScreen> {
     return 60; 
   }
 
-  // Parser Tanggal yang sangat kuat
+  // Parser Tanggal
   DateTime? _robustParseDate(String val) {
     if (val.isEmpty || val == '-' || val.toLowerCase() == 'null') return null;
     try {
       String s = val.trim().replaceAll('/', '-');
-      // Perbaikan jika backend mengirimkan DD-MM-YYYY HH:mm
       final parts = s.split(' ');
       if (parts.isNotEmpty) {
          final dateParts = parts[0].split('-');
@@ -403,9 +404,8 @@ class _ActivityDetailScreenState extends State<ActivityDetailScreen> {
 
   // 🔥 3. INFORMASI WAKTU DENGAN KALKULASI CERDAS (Menimpa Jadwal Bodong)
   Widget _buildSection3TimeInfo(Map<String, dynamic> dataWaktu, Map<String, dynamic> dataTreatment) {
-    final maps = [dataWaktu, dataTreatment, _detailData ?? {}];
+    final maps = [dataWaktu, dataTreatment, _detailData ?? {}, _argsData ?? {}];
     
-    // Fungsi pencari kunci spesifik dari seluruh data
     String _find(List<String> keys) {
       for (var map in maps) {
         for (var k in keys) {
@@ -428,8 +428,24 @@ class _ActivityDetailScreenState extends State<ActivityDetailScreen> {
     String actualDur = _find(['durasi_aktual', 'actual_duration', 'elapsed_time', 'durasi_realisasi', 'waktu_pengerjaan']);
     String schedDur = _find(['total_duration', 'durasi', 'duration']);
 
-    // Ekspektasi durasi dari parameter treatment (Sesuai dengan Active Job Screen!)
-    int expectedMins = _parseDuration(schedDur, dataTreatment['treatment_name']?.toString() ?? '');
+    // 🔥 1. Ekstrak durasi asli langsung dari argumen Job Aktif (paling akurat)
+    int expectedMins = 0;
+    if (_argsData != null && _argsData!['treatments'] != null && _argsData!['treatments'] is List) {
+      for (var item in _argsData!['treatments']) {
+        if (item is Map) {
+          String d = (item['duration'] ?? item['durasi'] ?? item['waktu'] ?? '').toString();
+          int? parsed = int.tryParse(d.replaceAll(RegExp(r'[^0-9]'), '')); // Membuang string 'min' agar jadi angka
+          if (parsed != null && parsed > 0) {
+            expectedMins += parsed; 
+          }
+        }
+      }
+    }
+
+    // 🔥 2. Jika dari args tidak ketemu, gunakan fungsi fallback dari API report
+    if (expectedMins == 0) {
+      expectedMins = _parseDuration(schedDur, dataTreatment['treatment_name']?.toString() ?? '');
+    }
 
     DateTime? startDt = _robustParseDate(rawStart);
     DateTime? endDt = _robustParseDate(rawEnd);
@@ -450,25 +466,32 @@ class _ActivityDetailScreenState extends State<ActivityDetailScreen> {
       displaySelesai = rawEnd;
     }
 
-    // --- LOGIKA PERHITUNGAN DURASI FINAL (OVERRIDE JIKA JADWAL API TIDAK SESUAI) ---
+    // --- LOGIKA PERHITUNGAN DURASI FINAL DAN OVERRIDE WAKTU SELESAI ---
     if (actualDur.isNotEmpty) {
-      // Jika backend mengirim durasi aktual secara eksplisit
-      int? sec = int.tryParse(actualDur);
-      if (sec != null && sec > 100) { // Asumsi angka lebih dari 100 adalah satuan detik
+      int? sec = int.tryParse(actualDur.replaceAll(RegExp(r'[^0-9]'), ''));
+      if (sec != null && sec > 300) { 
          displayDurasi = '${sec ~/ 60} menit';
+      } else if (sec != null && sec > 0) {
+         // Jika tercatat exactly 60 menit dari API padahal aslinya (misal) 80, kita Timpa!
+         if ((sec == 60 || sec == 0) && expectedMins > 0 && expectedMins != 60) {
+            displayDurasi = '$expectedMins menit';
+            if (startDt != null) {
+                endDt = startDt.add(Duration(minutes: expectedMins));
+                displaySelesai = DateFormat('dd MMM yyyy, HH:mm').format(endDt);
+            }
+         } else {
+            displayDurasi = '$sec menit';
+         }
       } else {
          displayDurasi = actualDur.contains('menit') || actualDur.contains('min') ? actualDur : '$actualDur menit';
       }
     } 
     else if (startDt != null && endDt != null) {
-      // Hitung dari jadwal selisih Start dan End
       int diffMins = endDt.difference(startDt).inMinutes;
       
-      // 🔥 KUNCI PERBAIKAN: Jika API hanya mengirim jadwal default 60 menit (09:00 - 10:00), 
-      // padahal kita tahu treatmentnya (misal) 80 menit, kita TIMPA/OVERRIDE dengan durasi aslinya!
-      if (actualStart.isEmpty && (diffMins == 60 || diffMins == 0) && expectedMins != 60 && expectedMins > 0) {
+      // 🔥 OVERRIDE: Jika selisih API hanya 60 menit default, padahal aslinya (misal) 80 menit, Timpa!
+      if ((diffMins == 60 || diffMins == 0 || diffMins < 0) && expectedMins > 0) {
          displayDurasi = '$expectedMins menit';
-         // Sesuaikan juga jam selesainya agar logis!
          endDt = startDt.add(Duration(minutes: expectedMins));
          displaySelesai = DateFormat('dd MMM yyyy, HH:mm').format(endDt);
       } else {
@@ -476,10 +499,10 @@ class _ActivityDetailScreenState extends State<ActivityDetailScreen> {
       }
     } 
     else {
-      // Opsi terakhir jika tidak ada data waktu yang lengkap
-      displayDurasi = '$expectedMins menit';
+      // Jika salah satu waktu belum dicatat, tampilkan durasi default
+      displayDurasi = expectedMins > 0 ? '$expectedMins menit' : '60 menit';
       if (startDt != null && rawEnd.isEmpty) {
-         endDt = startDt.add(Duration(minutes: expectedMins));
+         endDt = startDt.add(Duration(minutes: expectedMins > 0 ? expectedMins : 60));
          displaySelesai = DateFormat('dd MMM yyyy, HH:mm').format(endDt);
       }
     }

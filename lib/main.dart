@@ -1,4 +1,8 @@
 import 'package:flutter/material.dart';
+
+// 🔥 IMPORT API SERVICE
+import 'package:therapist_momnjo/data/api_service.dart';
+
 import 'package:therapist_momnjo/ui/screens/active_job_screen.dart';
 import 'package:therapist_momnjo/ui/screens/activity_detail_screen.dart';
 import 'package:therapist_momnjo/ui/screens/booking_detail_screen.dart';
@@ -18,25 +22,30 @@ import 'package:therapist_momnjo/ui/screens/chat_admin_screen.dart';
 import 'package:therapist_momnjo/ui/screens/activity_job_screen.dart';
 import 'package:therapist_momnjo/ui/screens/earnings_screen.dart';
 import 'package:therapist_momnjo/ui/screens/profile_screen.dart';
-import 'package:therapist_momnjo/ui/screens/leave_management_screen.dart'; // Tambahkan import LeaveManagementScreen
-import 'package:therapist_momnjo/ui/screens/active_job_screen.dart'; // Tambahkan import ActiveJobScreen
-import 'package:therapist_momnjo/ui/screens/activity_detail_screen.dart'; 
+import 'package:therapist_momnjo/ui/screens/leave_management_screen.dart'; 
 import 'package:therapist_momnjo/ui/screens/data_diri_screen.dart'; 
 import 'package:therapist_momnjo/ui/screens/sop_panduan_screen.dart'; 
 import 'package:therapist_momnjo/ui/screens/history_laporan_screen.dart'; 
 import 'package:therapist_momnjo/ui/screens/bantuan_dukungan_screen.dart'; 
-import 'package:therapist_momnjo/ui/screens/detail_laporan_screen.dart'; 
 import 'package:therapist_momnjo/ui/screens/booking_detail_onsite_screen.dart'; 
-import 'package:therapist_momnjo/ui/screens/history_detail_payout.dart'; 
 
-void main() {
-  // Memastikan binding Flutter sudah terinisialisasi
+// 🔥 UBAH MAIN MENJADI ASYNC
+void main() async {
+  // Memastikan binding Flutter sudah terinisialisasi sebelum memanggil fungsi async
   WidgetsFlutterBinding.ensureInitialized();
-  runApp(const MomnjoTherapistApp());
+  
+  // 🔥 CEK STATUS LOGIN SEBELUM APLIKASI DIJALANKAN
+  bool isUserLoggedIn = await ApiService().isLoggedIn();
+  
+  // Kirim status login ke widget utama
+  runApp(MomnjoTherapistApp(isLoggedIn: isUserLoggedIn));
 }
 
 class MomnjoTherapistApp extends StatelessWidget {
-  const MomnjoTherapistApp({Key? key}) : super(key: key);
+  // Tangkap status login
+  final bool isLoggedIn;
+  
+  const MomnjoTherapistApp({Key? key, required this.isLoggedIn}) : super(key: key);
 
   @override
   Widget build(BuildContext context) {
@@ -83,12 +92,13 @@ class MomnjoTherapistApp extends StatelessWidget {
         ),
       ),
 
-      // Halaman pertama yang akan muncul saat app dibuka
-      initialRoute: '/', 
+      // 🔥 MENGGUNAKAN HOME UNTUK MENGHINDARI BENTROKAN DENGAN SPLASH SCREEN ROUTE ('/')
+      home: isLoggedIn ? const MainWrapperScreen() : const SplashScreen(),
       
       // Daftar rute aplikasi
       routes: {
-        '/': (context) => const SplashScreen(),
+        // Hapus '/' dari routes karena sudah di-handle oleh home
+        '/splash': (context) => const SplashScreen(),
         '/login': (context) => const LoginScreen(),
         '/register': (context) => const RegisterScreen(),
         
@@ -129,7 +139,6 @@ class MomnjoTherapistApp extends StatelessWidget {
     );
   }
 }
-
 
 // ============================================================================
 // WIDGET BARU: Pembungkus untuk Bottom Navigation Bar (Footer)

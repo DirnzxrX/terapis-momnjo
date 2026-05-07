@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart'; 
+import 'package:intl/intl.dart';
 import 'package:therapist_momnjo/data/api_service.dart'; 
 
 class RequestPayoutScreen extends StatefulWidget {
@@ -32,17 +33,19 @@ class _RequestPayoutScreenState extends State<RequestPayoutScreen> {
   bool _isLoadingBalance = true;
   bool _isSubmitting = false;
   
-  // 🔥 STATE BARU UNTUK MEMISAHKAN SALDO
+  // 🔥 STATE BARU UNTUK MEMISAHKAN SALDO DAN TANGGAL
   int _availableBalance = 0; // Nominal yang tampil di layar
   int _saldoTreatment = 0; // Nominal asli treatment
   int _saldoPaket = 0; // Nominal asli paket
+  
+  String? _startDate;
+  String? _endDate;
 
   bool _isInit = true; // Penanda untuk membaca argumen pertama kali
 
   @override
   void initState() {
     super.initState();
-    _fetchBalance(); // Menarik data saldo asli dari API
 
     _amountController.addListener(() {
       setState(() {
@@ -61,14 +64,22 @@ class _RequestPayoutScreenState extends State<RequestPayoutScreen> {
     // Menangkap argumen yang dikirim dari EarningsScreen
     if (_isInit) {
       final args = ModalRoute.of(context)?.settings.arguments;
-      if (args != null && args is String) {
-        if (args.toLowerCase() == 'paket') {
-          _selectedJenisPayout = 'paket';
-        } else {
-          _selectedJenisPayout = 'treatment';
+      if (args != null) {
+        if (args is Map) {
+          // Tangkap tab dan parameter tanggal
+          final tab = args['tab']?.toString().toLowerCase() ?? 'treatment';
+          _selectedJenisPayout = tab == 'paket' ? 'paket' : 'treatment';
+          _startDate = args['startDate'];
+          _endDate = args['endDate'];
+        } else if (args is String) {
+          // Fallback jika arguments hanya berupa string (nama tab)
+          _selectedJenisPayout = args.toLowerCase() == 'paket' ? 'paket' : 'treatment';
         }
       }
+      
       _isInit = false;
+      // 🔥 LANGSUNG TEMBAK API MENGGUNAKAN TANGGAL YANG SUDAH DITANGKAP
+      _fetchBalance(); 
     }
   }
 
@@ -81,29 +92,129 @@ class _RequestPayoutScreenState extends State<RequestPayoutScreen> {
     super.dispose();
   }
 
-  // --- FUNGSI MENGAMBIL SALDO ASLI DARI API ---
+  // --- HELPER UNTUK PARSING DAN FILTER TANGGAL SECARA IDENTIK ---
+  double _parseDouble(dynamic value) {
+    if (value == null) return 0.0;
+    if (value is int) return value.toDouble();
+    if (value is double) return value;
+    if (value is String) return double.tryParse(value) ?? 0.0;
+    return 0.0;
+  }
+
+  List<dynamic> _filterListByDate(List<dynamic> list, String primaryKey, {String? fallbackKey}) {
+    if (_startDate == null || _endDate == null) return list; 
+    
+    return list.where((item) {
+      String tgl = item[primaryKey] ?? (fallbackKey != null ? item[fallbackKey] : null) ?? item['created_at'] ?? '';
+      if (tgl.isEmpty) return true; 
+      
+      try {
+        DateTime dt = DateTime.parse(tgl);
+        DateTime start = DateTime.parse(_startDate!);
+        DateTime end = DateTime.parse(_endDate!).add(const Duration(hours: 23, minutes: 59, seconds: 59));
+        
+        return dt.isAfter(start.subtract(const Duration(seconds: 1))) && 
+               dt.isBefore(end.add(const Duration(seconds: 1)));
+      } catch (e) {
+        return true;
+      }
+    }).toList();
+  }
+
+  // --- FUNGSI MENGAMBIL SALDO DARI API LALU DIHITUNG IDENTIK DENGAN EARNINGS ---
   Future<void> _fetchBalance() async {
+    setState(() {
+      _isLoadingBalance = true;
+    });
+
     try {
       final api = ApiService();
-      final response = await api.getBalance(); 
+      
+      // 🔥 TEMBAK KEDUA API (BALANCE DAN HISTORY) MENGGUNAKAN FILTER TANGGAL
+      final balanceRes = await api.getBalance(startDate: _startDate, endDate: _endDate); 
+      final historyRes = await api.getPayoutHistory(startDate: _startDate, endDate: _endDate);
 
       if (mounted) {
-        setState(() {
-          if ((response['success'] == true || response['status'] == 'success') && response['data'] != null) {
-            final data = response['data'];
+        double omsetTreatment = 0;
+        double komisiTreatment = 0;
+        double omsetPaket = 0;
+        double komisiPaket = 0;
+        
+        List<dynamic> rincianTreatment = [];
+        List<dynamic> rincianPaket = [];
+
+        // 1. EKSTRAK DARI BALANCE API
+        if (balanceRes['success'] == true || balanceRes['status'] == 'success') {
+          final data = balanceRes['data'] ?? {};
+          final Map<String, dynamic> tData = data['treatment'] ?? {};
+          final Map<String, dynamic> pData = data['paket'] ?? {};
+
+          omsetTreatment = _parseDouble(tData['total_omset_treatment'] ?? tData['pendapatan_sebelum_diskon'] ?? tData['total_omset']);
+          komisiTreatment = _parseDouble(tData['total_komisi_treatment'] ?? tData['komisi_treatment'] ?? tData['total_komisi'] ?? tData['total_balance_treatment']);
+
+          omsetPaket = _parseDouble(pData['total_omset_paket'] ?? pData['harga_paket'] ?? pData['total_omset']);
+          komisiPaket = _parseDouble(pData['total_komisi_paket'] ?? pData['komisi_paket_bersih'] ?? pData['total_komisi'] ?? pData['total_balance_paket']);
+        }
+
+        // 2. EKSTRAK DARI HISTORY API
+        if (historyRes['success'] == true || historyRes['status'] == 'success') {
+          final hData = historyRes['data'];
+          final balanceInfo = (hData is Map && hData.containsKey('balance_info')) ? hData['balance_info'] : historyRes['balance_info'];
+
+          if (balanceInfo != null) {
+            final tData = balanceInfo['treatment'] ?? {};
+            final pData = balanceInfo['paket'] ?? {};
+
+            rincianTreatment = tData['rincian_treatment'] ?? balanceInfo['rincian_treatment'] ?? [];
             
-            // 🔥 MENGAMBIL DATA MASING-MASING
-            final Map<String, dynamic> treatmentData = data['treatment'] ?? {};
-            final Map<String, dynamic> paketData = data['paket'] ?? {};
-
-            // Mengambil saldo total spesifik yang bisa ditarik
-            _saldoTreatment = (double.tryParse(treatmentData['total_balance_treatment']?.toString() ?? '0') ?? 0.0).toInt();
-            _saldoPaket = (double.tryParse(paketData['total_balance_paket']?.toString() ?? '0') ?? 0.0).toInt();
-
-            // Set tampilan awal sesuai dropdown yang sedang aktif
-            _updateDisplayedBalance();
+            List<dynamic> listPaketGabungan = [];
+            if (pData['rincian_paket'] != null) listPaketGabungan.addAll(pData['rincian_paket']);
+            if (pData['rincian_override'] != null) listPaketGabungan.addAll(pData['rincian_override']);
+            if (listPaketGabungan.isEmpty && balanceInfo['rincian_paket'] != null) {
+              listPaketGabungan.addAll(balanceInfo['rincian_paket']);
+            }
+            rincianPaket = listPaketGabungan;
           }
+        }
+
+        // 3. FILTER HISTORY SESUAI TANGGAL (Persis Seperti Earnings Screen)
+        final filteredTreatment = _filterListByDate(rincianTreatment, 'tgl_dokumen');
+        final filteredPaket = _filterListByDate(rincianPaket, 'tgl_transaksi', fallbackKey: 'tgl_dokumen');
+
+        // 4. SINKRONISASI LOGIKA PERHITUNGAN MENGGUNAKAN DATA API TERBARU
+        if (komisiTreatment < (omsetTreatment * 0.04)) {
+          double sumKomisi = 0;
+          for (var item in filteredTreatment) {
+            double o = _parseDouble(item['pendapatan_sebelum_diskon'] ?? item['harga'] ?? item['total_omset']);
+            double k = _parseDouble(item['komisi_treatment'] ?? item['komisi_terapis'] ?? item['komisi_kotor'] ?? item['komisi_bersih'] ?? item['komisi']);
+            if (k <= 0 && o > 0) k = o * 0.05; 
+            sumKomisi += k;
+          }
+          if (sumKomisi > 0) komisiTreatment = sumKomisi;
+        }
+
+        if (komisiPaket < (omsetPaket * 0.04)) {
+          double sumKomisi = 0;
+          for (var item in filteredPaket) {
+            bool isOverrideDeduction = item.containsKey('overriding_terapis') && item.containsKey('potongan_komisi');
+            if (isOverrideDeduction) {
+              sumKomisi -= _parseDouble(item['potongan_komisi']);
+            } else {
+              double o = _parseDouble(item['harga_paket'] ?? item['harga'] ?? item['omset']);
+              double k = _parseDouble(item['komisi_paket_bersih'] ?? item['komisi_bersih'] ?? item['komisi_terapis'] ?? item['komisi']);
+              if (k <= 0 && o > 0) k = o * 0.05; 
+              sumKomisi += k;
+            }
+          }
+          if (sumKomisi > 0) komisiPaket = sumKomisi;
+        }
+
+        setState(() {
+          // Tetapkan saldo mutlak
+          _saldoTreatment = komisiTreatment.toInt();
+          _saldoPaket = komisiPaket.toInt();
           _isLoadingBalance = false;
+          _updateDisplayedBalance();
         });
       }
     } catch (e) {
@@ -345,6 +456,23 @@ class _RequestPayoutScreenState extends State<RequestPayoutScreen> {
   // --- WIDGET KOMPONEN ---
 
   Widget _buildBalanceCard() {
+    String periodeText = 'Hari Ini';
+    
+    // Tampilkan label tanggal jika sedang menggunakan filter
+    if (_startDate != null && _endDate != null) {
+      if (_startDate == _endDate) {
+        try {
+          periodeText = 'pada ${DateFormat('dd MMM yyyy').format(DateTime.parse(_startDate!))}';
+        } catch (_) {}
+      } else {
+        try {
+          periodeText = 'Periode ${DateFormat('dd MMM').format(DateTime.parse(_startDate!))} - ${DateFormat('dd MMM yyyy').format(DateTime.parse(_endDate!))}';
+        } catch (_) {}
+      }
+    } else {
+       periodeText = 'pada ${DateFormat('dd MMM yyyy').format(DateTime.now())}';
+    }
+
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.symmetric(vertical: 24),
@@ -374,7 +502,10 @@ class _RequestPayoutScreenState extends State<RequestPayoutScreen> {
               : Text(_formatRupiah(_availableBalance), style: TextStyle(color: textDarkBrown, fontSize: 32, fontWeight: FontWeight.w900)),
           
           const SizedBox(height: 4),
-          Text('Dapat Ditarik Hari Ini', style: TextStyle(color: textDarkBrown.withOpacity(0.7), fontSize: 12, fontWeight: FontWeight.w500)),
+          Text(
+            _startDate != null ? 'Sesuai Filter $periodeText' : 'Dapat Ditarik $periodeText', 
+            style: TextStyle(color: textDarkBrown.withOpacity(0.7), fontSize: 12, fontWeight: FontWeight.w500)
+          ),
         ],
       ),
     );
