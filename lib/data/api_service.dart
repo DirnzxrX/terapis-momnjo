@@ -4,7 +4,7 @@ import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 
 class ApiService {
-  static const String baseUrl = "https://app.momnjo.com/dev";
+  static const String baseUrl = "https://dashboard.momnjo.my.id/";
 
   // --- HELPER: MENGAMBIL TOKEN JWT DARI LOKAL ---
   Future<String?> _getToken() async {
@@ -165,6 +165,10 @@ class ApiService {
     else if (action.toLowerCase() == 'start') mappedStatus = 'In Progress';
     else if (action.toLowerCase() == 'finish') mappedStatus = 'Completed';
 
+    // 🔥 PERBAIKAN: Ambil waktu saat ini (Real-Time) dari HP saat tombol ditekan
+    DateTime now = DateTime.now();
+    String currentTime = "${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')} ${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}:${now.second.toString().padLeft(2, '0')}";
+
     try {
       http.Response response;
 
@@ -178,6 +182,13 @@ class ApiService {
         // 🔥 PROTEKSI GANDA: Kirim id_booking juga jika API bingung format MNJ...
         request.fields['id_booking'] = idTransaksi; 
         request.fields['status'] = mappedStatus; 
+        
+        // 🔥 PERBAIKAN: Selipkan waktu mulai dan selesai ke dalam API POST
+        if (action.toLowerCase() == 'start') {
+           request.fields['waktu_mulai'] = currentTime;
+        } else if (action.toLowerCase() == 'finish') {
+           request.fields['waktu_selesai'] = currentTime;
+        }
 
         if (imagePath != null && imagePath.isNotEmpty) {
           request.files.add(await http.MultipartFile.fromPath('image', imagePath));
@@ -195,6 +206,14 @@ class ApiService {
           'id_booking': idTransaksi, 
           'status': mappedStatus, 
         };
+        
+        // 🔥 PERBAIKAN: Selipkan waktu mulai dan selesai ke dalam JSON API
+        if (action.toLowerCase() == 'start') {
+           body['waktu_mulai'] = currentTime;
+        } else if (action.toLowerCase() == 'finish') {
+           body['waktu_selesai'] = currentTime;
+        }
+
         if (productName != null && productName.isNotEmpty) {
           body['product_name'] = productName;
         }

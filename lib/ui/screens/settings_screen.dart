@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
-import 'package:shared_preferences/shared_preferences.dart'; // Tambahan Import
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:therapist_momnjo/data/api_service.dart'; // Import ApiService
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({Key? key}) : super(key: key);
@@ -9,14 +10,14 @@ class SettingsScreen extends StatefulWidget {
 }
 
 class _SettingsScreenState extends State<SettingsScreen> {
-  final Color primaryPink = const Color(0xFFF48FB1); // Disamakan dengan home_screen.dart
+  final Color primaryPink = const Color(0xFFF48FB1);
   final Color textDark = Colors.black87;
 
   // --- STATE DATA DINAMIS ---
   bool _isLoading = true;
-  String _userName = 'Memuat...';
-  String _userPhone = '-';
-  String _idTerapis = '-';
+  String _userName = 'Terapis';
+  String _userPhone = '';
+  String _idTerapis = '';
   String _fotoProfil = 'https://i.pravatar.cc/150?img=5';
 
   @override
@@ -25,24 +26,60 @@ class _SettingsScreenState extends State<SettingsScreen> {
     _loadSettingsData();
   }
 
-  // --- FUNGSI MENGAMBIL DATA DARI SHARED PREFERENCES ---
+  // --- FUNGSI MENGAMBIL DATA DARI API & LOCAL ---
   Future<void> _loadSettingsData() async {
+    setState(() => _isLoading = true);
+
     try {
+      // 1. Ambil data lokal dulu untuk tampilan cepat (Instant UI)
       SharedPreferences prefs = await SharedPreferences.getInstance();
-      if (mounted) {
+      setState(() {
+        // Cek berbagai kemungkinan key yang mungkin disimpan saat login
+        _userName = prefs.getString('fullname') ?? 
+                    prefs.getString('nama_lengkap') ?? 
+                    prefs.getString('nama') ?? 'Terapis';
+        
+        _userPhone = prefs.getString('no_telepon') ?? 
+                     prefs.getString('phone') ?? '';
+        
+        _idTerapis = prefs.getString('username') ?? 
+                     prefs.getString('id_terapis') ?? '';
+        
+        _fotoProfil = prefs.getString('foto_profil') ?? 'https://i.pravatar.cc/150?img=5';
+      });
+
+      // 2. Tarik data terbaru dari server (Sync Data)
+      final response = await ApiService().getProfile();
+
+      // Backend Momnjo biasanya menggunakan field 'status' atau 'success'
+      if ((response['success'] == true || response['status'] == 'success') && response['data'] != null) {
+        final data = response['data'];
+        
+        // Ambil nama dari berbagai kemungkinan key dari respon profil
+        String remoteName = data['nama_lengkap'] ?? data['fullname'] ?? data['name'] ?? data['nama'] ?? _userName;
+        String remotePhone = data['no_telepon'] ?? data['phone'] ?? data['telepon'] ?? _userPhone;
+        String remoteId = data['id_terapis'] ?? data['username'] ?? data['id']?.toString() ?? _idTerapis;
+        String remoteFoto = data['foto'] ?? data['foto_profil'] ?? data['image'] ?? _fotoProfil;
+
         setState(() {
-          _userName = prefs.getString('fullname') ?? prefs.getString('nama_lengkap') ?? '-';
-          _userPhone = prefs.getString('no_telepon') ?? prefs.getString('phone') ?? '-';
-          _idTerapis = prefs.getString('username') ?? prefs.getString('id_terapis') ?? '-';
-          _fotoProfil = prefs.getString('foto_profil') ?? 'https://i.pravatar.cc/150?img=5';
-          _isLoading = false;
+          _userName = remoteName;
+          _userPhone = remotePhone;
+          _idTerapis = remoteId;
+          _fotoProfil = remoteFoto;
         });
+
+        // 3. Update SharedPreferences agar sinkron di halaman lain (Home/Profile)
+        await prefs.setString('nama_lengkap', remoteName);
+        await prefs.setString('fullname', remoteName);
+        await prefs.setString('no_telepon', remotePhone);
+        await prefs.setString('foto_profil', remoteFoto);
+        if (remoteId.isNotEmpty) await prefs.setString('id_terapis', remoteId);
       }
     } catch (e) {
+      debugPrint("Gagal memuat profil: $e");
+    } finally {
       if (mounted) {
-        setState(() {
-          _isLoading = false;
-        });
+        setState(() => _isLoading = false);
       }
     }
   }
@@ -99,12 +136,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
             ),
             ElevatedButton(
               onPressed: () async {
-                // Simpan ke SharedPreferences agar sinkron dengan DataDiriScreen & ProfileScreen
                 SharedPreferences prefs = await SharedPreferences.getInstance();
                 await prefs.setString('fullname', nameController.text);
                 await prefs.setString('no_telepon', phoneController.text);
 
-                // Update UI di halaman Settings ini
                 setState(() {
                   _userName = nameController.text;
                   _userPhone = phoneController.text;
@@ -193,17 +228,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
         ),
       ),
       child: Scaffold(
-        backgroundColor: Colors.transparent, // Transparan agar gambar background terlihat
+        backgroundColor: Colors.transparent,
         appBar: AppBar(
           backgroundColor: Colors.transparent,
           elevation: 0,
           leading: IconButton(
             icon: Icon(Icons.arrow_back, color: textDark),
-            onPressed: () {
-              if (Navigator.canPop(context)) {
-                Navigator.pop(context);
-              }
-            },
+            onPressed: () => Navigator.pop(context),
           ),
           title: Text(
             'Pengaturan',
@@ -256,6 +287,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
   // --- WIDGET COMPONENTS ---
 
   Widget _buildProfileCard() {
+    // Bangun string identitas bawah (ID & No Telp)
+    String subtitle = "";
+    if (_userPhone.isNotEmpty) subtitle += _userPhone;
+    if (_userPhone.isNotEmpty && _idTerapis.isNotEmpty) subtitle += " • ";
+    if (_idTerapis.isNotEmpty) subtitle += _idTerapis;
+
     return Container(
       padding: const EdgeInsets.all(16.0),
       decoration: BoxDecoration(
@@ -275,11 +312,18 @@ class _SettingsScreenState extends State<SettingsScreen> {
             padding: const EdgeInsets.all(3),
             decoration: BoxDecoration(
               shape: BoxShape.circle,
-              color: primaryPink.withOpacity(0.15), // Efek transparan dari primaryPink
+              color: primaryPink.withOpacity(0.15),
             ),
             child: CircleAvatar(
               radius: 30,
-              backgroundImage: NetworkImage(_fotoProfil), 
+              backgroundImage: _fotoProfil.startsWith('http') 
+                  ? NetworkImage(_fotoProfil) 
+                  : AssetImage(_fotoProfil) as ImageProvider, 
+              onBackgroundImageError: (_, __) {
+                setState(() {
+                  _fotoProfil = 'https://i.pravatar.cc/150?img=5';
+                });
+              },
             ),
           ),
           const SizedBox(width: 16),
@@ -288,7 +332,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  _userName, // Menggunakan variabel dinamis
+                  _userName,
                   style: TextStyle(
                     fontSize: 18,
                     fontWeight: FontWeight.bold,
@@ -297,14 +341,16 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                 ),
-                const SizedBox(height: 4),
-                Text(
-                  '$_userPhone • $_idTerapis', // Menggunakan variabel dinamis
-                  style: TextStyle(
-                    fontSize: 12,
-                    color: Colors.grey[600],
+                if (subtitle.isNotEmpty) ...[
+                  const SizedBox(height: 4),
+                  Text(
+                    subtitle,
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: Colors.grey[600],
+                    ),
                   ),
-                ),
+                ],
               ],
             ),
           ),
