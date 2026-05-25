@@ -4,7 +4,7 @@ import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 
 class ApiService {
-  static const String baseUrl = "https://dashboard.momnjo.my.id/";
+  static const String baseUrl = "https://dashboard.momnjo.my.id/dev/api_terapis";
 
   // --- HELPER: MENGAMBIL TOKEN JWT DARI LOKAL ---
   Future<String?> _getToken() async {
@@ -56,7 +56,7 @@ class ApiService {
     if (status != null && status.isNotEmpty) queryParams['status'] = status;
     if (search != null && search.isNotEmpty) queryParams['search'] = search;
 
-    final uri = Uri.parse('$baseUrl/api_terapis/get_all_jobs.php')
+    final uri = Uri.parse('$baseUrl/get_all_jobs.php')
         .replace(queryParameters: queryParams.isNotEmpty ? queryParams : null);
 
     try {
@@ -110,7 +110,7 @@ class ApiService {
       return {'success': false, 'message': 'ID Transaksi wajib diisi.'};
     }
 
-    final String url = '$baseUrl/api_terapis/get_job_detail.php?id_transaksi=$idTransaksi';
+    final String url = '$baseUrl/get_job_detail.php?id_transaksi=$idTransaksi';
 
     try {
       final response = await http.get(
@@ -158,7 +158,7 @@ class ApiService {
     final String? cookie = await _getCookie();
     if (token == null) return {'success': false, 'message': 'Token tidak ditemukan'};
 
-    final String url = '$baseUrl/api_terapis/update_service.php';
+    final String url = '$baseUrl/update_service.php';
     
     String mappedStatus = action;
     if (action.toLowerCase() == 'arrived') mappedStatus = 'Arrived';
@@ -266,7 +266,7 @@ class ApiService {
     final String? cookie = await _getCookie();
     if (token == null) return {'success': false, 'message': 'Token tidak ditemukan'};
 
-    final String url = '$baseUrl/api_terapis/get_stats.php';
+    final String url = '$baseUrl/get_stats.php';
 
     try {
       final response = await http.get(
@@ -308,7 +308,7 @@ class ApiService {
 
     // 🔥 DIKEMBALIKAN KE ENDPOINT ASLI (update_booking_status.php)
     // update_service.php hanya untuk treatment item.
-    final String url = '$baseUrl/api_terapis/update_booking_status.php';
+    final String url = '$baseUrl/update_booking_status.php';
 
     try {
       http.Response response;
@@ -395,7 +395,7 @@ class ApiService {
       }
     }
 
-    final String url = '$baseUrl/api_terapis/store_data_medis.php';
+    final String url = '$baseUrl/store_data_medis.php';
     final Map<String, dynamic> payloadData = {
       'id_transaksi': idTransaksi,
       'id_customer': idCustomer,
@@ -450,7 +450,7 @@ class ApiService {
     final String? cookie = await _getCookie();
     if (token == null) return {'success': false, 'message': 'Token tidak ditemukan'};
 
-    final String url = '$baseUrl/api_terapis/history_detail.php?id_transaksi=$idTransaksi';
+    final String url = '$baseUrl/history_detail.php?id_transaksi=$idTransaksi';
 
     try {
       final response = await http.get(
@@ -493,7 +493,7 @@ class ApiService {
     final String? cookie = await _getCookie();
     if (token == null) return {'success': false, 'message': 'Token tidak ditemukan'};
 
-    final String url = '$baseUrl/api_terapis/update_service.php';
+    final String url = '$baseUrl/update_service.php';
     final Map<String, dynamic> body = {
       'id_transaksi': idTransaksi,
       // 🔥 PROTEKSI GANDA
@@ -537,7 +537,7 @@ class ApiService {
   // LOGIN (MENDUKUNG PENYIMPANAN COOKIE SESSION)
   // =========================================================================
   Future<Map<String, dynamic>> login(String username, String password) async {
-    final String url = '$baseUrl/api_terapis/login.php';
+    final String url = '$baseUrl/login.php';
     final Map<String, dynamic> body = {
       'username': username.trim(),
       'password': password.trim()
@@ -631,7 +631,7 @@ class ApiService {
     if (startDate != null && startDate.isNotEmpty) queryParams['start_date'] = startDate;
     if (endDate != null && endDate.isNotEmpty) queryParams['end_date'] = endDate;
 
-    final uri = Uri.parse('$baseUrl/api_terapis/get_balance.php')
+    final uri = Uri.parse('$baseUrl/get_balance.php')
         .replace(queryParameters: queryParams.isNotEmpty ? queryParams : null);
 
     try {
@@ -688,7 +688,7 @@ class ApiService {
     final String? cookie = await _getCookie();
     if (token == null) return {'success': false, 'message': 'Token tidak ditemukan'};
 
-    final String url = '$baseUrl/api_terapis/request_payout.php';
+    final String url = '$baseUrl/request_payout.php';
     
     final Map<String, dynamic> body = {
       'jenis_payout': jenisPayout,
@@ -749,7 +749,7 @@ class ApiService {
     if (startDate != null && startDate.isNotEmpty) queryParams['start_date'] = startDate;
     if (endDate != null && endDate.isNotEmpty) queryParams['end_date'] = endDate;
 
-    final uri = Uri.parse('$baseUrl/api_terapis/get_payout_history.php')
+    final uri = Uri.parse('$baseUrl/get_payout_history.php')
         .replace(queryParameters: queryParams.isNotEmpty ? queryParams : null);
 
     try {
@@ -799,7 +799,7 @@ class ApiService {
     final String? cookie = await _getCookie();
     if (token == null) return {'success': false, 'message': 'Token tidak ditemukan'};
 
-    final String url = '$baseUrl/api_terapis/get_detail_payout.php?id_payout=$idPayout';
+    final String url = '$baseUrl/get_detail_payout.php?id_payout=$idPayout';
 
     try {
       final response = await http.get(
@@ -840,7 +840,7 @@ class ApiService {
     final String? cookie = await _getCookie();
     if (token == null) return {'success': false, 'message': 'Token tidak ditemukan'};
 
-    final String url = '$baseUrl/api_terapis/get_profile.php';
+    final String url = '$baseUrl/get_profile.php';
 
     try {
       final response = await http.get(
@@ -881,7 +881,7 @@ class ApiService {
     final String? cookie = await _getCookie();
     if (token == null) return {'success': false, 'message': 'Token tidak ditemukan'};
 
-    final String url = '$baseUrl/api_terapis/get_data_diri.php';
+    final String url = '$baseUrl/get_data_diri.php';
 
     try {
       final response = await http.get(
@@ -918,7 +918,7 @@ class ApiService {
   // MENGAMBIL DATA CAROUSEL (BANNER TERAPIS)
   // =========================================================================
   Future<Map<String, dynamic>> getCarousel() async {
-    final String url = '$baseUrl/api_terapis/get_carousel.php';
+    final String url = '$baseUrl/get_carousel.php';
     final String? cookie = await _getCookie();
 
     try {
@@ -970,7 +970,7 @@ class ApiService {
     final String? cookie = await _getCookie();
     if (token == null) return {'success': false, 'message': 'Token tidak ditemukan'};
 
-    final String url = '$baseUrl/api_terapis/store_absensi.php';
+    final String url = '$baseUrl/store_absensi.php';
 
     try {
       final response = await http.get(
@@ -1016,7 +1016,7 @@ class ApiService {
     final String? cookie = await _getCookie();
     if (token == null) return {'success': false, 'message': 'Token tidak ditemukan'};
 
-    final String url = '$baseUrl/api_terapis/store_absensi.php';
+    final String url = '$baseUrl/store_absensi.php';
 
     try {
       http.Response response;
@@ -1103,7 +1103,7 @@ class ApiService {
     if (bulan != null && bulan.isNotEmpty) queryParams['bulan'] = bulan;
     if (tahun != null && tahun.isNotEmpty) queryParams['tahun'] = tahun;
 
-    final uri = Uri.parse('$baseUrl/api_terapis/get_history_absensi.php')
+    final uri = Uri.parse('$baseUrl/get_history_absensi.php')
         .replace(queryParameters: queryParams.isNotEmpty ? queryParams : null);
 
     try {
