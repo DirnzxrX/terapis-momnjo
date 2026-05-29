@@ -590,7 +590,7 @@ class ApiService {
         }
         return responseData;
       }
-      return {'success': false, 'message': 'Gagal terhubung ke server (Status: ${response.statusCode}).'};
+      return {'success': false, 'message': 'Username atau password salah.'};
     } catch (e) {
       return {'success': false, 'message': 'Terjadi kesalahan jaringan atau sistem: $e'};
     }

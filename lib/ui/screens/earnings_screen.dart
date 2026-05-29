@@ -597,7 +597,7 @@ class _EarningsScreenState extends State<EarningsScreen> {
         final namaTreatment = item['product_name'] ?? 'Treatment Tidak Diketahui';
         final qty = item['quantity'] ?? 1;
         
-        final pendapatanKotorItem = _parseDouble(item['pendapatan_sebelum_diskon'] ?? item['harga'] ?? item['total_omset']);
+        final pendapatanKotorItem = _parseDouble(item['pendapatan_setelah_diskon'] ?? item['harga'] ?? item['total_omset']);
         
         // Coba semua key komisi dari API, jika masih 0, hitung otomatis 5% dari omset
         double komisiItem = _parseDouble(item['komisi_treatment'] ?? item['komisi_terapis'] ?? item['komisi_kotor'] ?? item['komisi_bersih'] ?? item['komisi']);
