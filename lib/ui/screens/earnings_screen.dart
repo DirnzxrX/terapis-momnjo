@@ -137,10 +137,7 @@ class _EarningsScreenState extends State<EarningsScreen> {
       appBar: AppBar(
         backgroundColor: bgLight,
         elevation: 0,
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back, color: Colors.black87),
-          onPressed: () => Navigator.pop(context),
-        ),
+        automaticallyImplyLeading: false, // Menghilangkan tombol back bawaan
         title: const Text(
           'Pendapatan Terapis',
           style: TextStyle(color: Colors.black87, fontSize: 18, fontWeight: FontWeight.bold),
