@@ -615,7 +615,7 @@ class ApiService {
   }
 
   // =========================================================================
-  // MENGAMBIL SALDO TERAPIS (GET BALANCE) 
+  // MENGAMBIL SALDO TERAPIS (GET BALANCE LAMA)
   // =========================================================================
   Future<Map<String, dynamic>> getBalance({
     String? source,
@@ -1137,4 +1137,62 @@ class ApiService {
     }
   }
 
+  // =========================================================================
+  // 🔥 MENGAMBIL LAPORAN PENDAPATAN TERAPIS (ENDPOINT BARU)
+  // =========================================================================
+  Future<Map<String, dynamic>> getTerapisReport({
+    String? startDate,
+    String? endDate,
+    String? kodeGerai,
+  }) async {
+    final String? token = await _getToken();
+    final String? cookie = await _getCookie();
+    if (token == null) return {'success': false, 'message': 'Token tidak ditemukan'};
+
+    final Map<String, String> queryParams = {};
+    if (startDate != null && startDate.isNotEmpty) queryParams['start_date'] = startDate;
+    if (endDate != null && endDate.isNotEmpty) queryParams['end_date'] = endDate;
+    if (kodeGerai != null && kodeGerai.isNotEmpty) queryParams['kode_gerai'] = kodeGerai;
+
+    final uri = Uri.parse('$baseUrl/get_terapis_report.php')
+        .replace(queryParameters: queryParams.isNotEmpty ? queryParams : null);
+
+    try {
+      final response = await http.get(
+        uri,
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json',
+          'Authorization': 'Bearer $token',
+          if (cookie != null) 'Cookie': cookie,
+        },
+      );
+
+      _logDebug(url: uri.toString(), method: "GET", statusCode: response.statusCode, responseBody: response.body);
+
+      if (response.statusCode == 200) {
+        final Map<String, dynamic> data = json.decode(response.body);
+        if (data.containsKey('status')) {
+          data['success'] = data['status'] == 'success';
+        } else {
+          data['success'] = true;
+        }
+        return data;
+      } else if (response.statusCode == 401) {
+        await logout();
+        return {'success': false, 'message': 'Sesi habis, silakan login lagi.'};
+      } else if (response.statusCode == 405) {
+        return {'success': false, 'message': 'Metode HTTP tidak diizinkan. Hubungi tim backend.'};
+      }
+
+      try {
+        final errorData = json.decode(response.body);
+        return {'success': false, 'message': errorData['message'] ?? 'Gagal mengambil laporan terapis.'};
+      } catch (_) {
+        return {'success': false, 'message': 'Gagal mengambil laporan terapis (Status: ${response.statusCode})'};
+      }
+    } catch (e) {
+      return {'success': false, 'message': 'Kesalahan jaringan: $e'};
+    }
+  }
 }
