@@ -49,7 +49,7 @@ class ApiService {
   // =========================================================================
   Future<Map<String, dynamic>> getJobs({String? status, String? search}) async {
     final String? token = await _getToken();
-    final String? cookie = await _getCookie(); // Ambil cookie
+    final String? cookie = await _getCookie(); 
     if (token == null) return {'success': false, 'message': 'Unauthorized. Token tidak ditemukan.'};
 
     final Map<String, String> queryParams = {};
@@ -66,7 +66,7 @@ class ApiService {
           'Content-Type': 'application/json',
           'Accept': 'application/json',
           'Authorization': 'Bearer $token',
-          if (cookie != null) 'Cookie': cookie, // Sisipkan cookie jika ada
+          if (cookie != null) 'Cookie': cookie,
         },
       );
 
@@ -165,7 +165,6 @@ class ApiService {
     else if (action.toLowerCase() == 'start') mappedStatus = 'In Progress';
     else if (action.toLowerCase() == 'finish') mappedStatus = 'Completed';
 
-    // 🔥 PERBAIKAN: Ambil waktu saat ini (Real-Time) dari HP saat tombol ditekan
     DateTime now = DateTime.now();
     String currentTime = "${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')} ${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}:${now.second.toString().padLeft(2, '0')}";
 
@@ -176,14 +175,12 @@ class ApiService {
         var request = http.MultipartRequest('POST', Uri.parse(url));
         request.headers['Authorization'] = 'Bearer $token';
         request.headers['Accept'] = 'application/json';
-        if (cookie != null) request.headers['Cookie'] = cookie; // Sisipkan cookie untuk multipart
+        if (cookie != null) request.headers['Cookie'] = cookie; 
 
         request.fields['id_transaksi'] = idTransaksi;
-        // 🔥 PROTEKSI GANDA: Kirim id_booking juga jika API bingung format MNJ...
         request.fields['id_booking'] = idTransaksi; 
         request.fields['status'] = mappedStatus; 
         
-        // 🔥 PERBAIKAN: Selipkan waktu mulai dan selesai ke dalam API POST
         if (action.toLowerCase() == 'start') {
            request.fields['waktu_mulai'] = currentTime;
         } else if (action.toLowerCase() == 'finish') {
@@ -202,12 +199,10 @@ class ApiService {
       else {
         final Map<String, dynamic> body = {
           'id_transaksi': idTransaksi,
-          // 🔥 PROTEKSI GANDA: Kirim id_booking juga jika API bingung format MNJ...
           'id_booking': idTransaksi, 
           'status': mappedStatus, 
         };
         
-        // 🔥 PERBAIKAN: Selipkan waktu mulai dan selesai ke dalam JSON API
         if (action.toLowerCase() == 'start') {
            body['waktu_mulai'] = currentTime;
         } else if (action.toLowerCase() == 'finish') {
@@ -306,8 +301,6 @@ class ApiService {
     final String? cookie = await _getCookie();
     if (token == null) return {'success': false, 'message': 'Token tidak ditemukan'};
 
-    // 🔥 DIKEMBALIKAN KE ENDPOINT ASLI (update_booking_status.php)
-    // update_service.php hanya untuk treatment item.
     final String url = '$baseUrl/update_booking_status.php';
 
     try {
@@ -496,7 +489,6 @@ class ApiService {
     final String url = '$baseUrl/update_service.php';
     final Map<String, dynamic> body = {
       'id_transaksi': idTransaksi,
-      // 🔥 PROTEKSI GANDA
       'id_booking': idTransaksi,
       'status': 'Completed', 
       'rating': rating > 0 ? rating : 5, 
@@ -558,17 +550,14 @@ class ApiService {
       if (response.statusCode == 200 || response.statusCode == 201) {
         final responseData = json.decode(response.body);
 
-        // 🔥 PERBAIKAN: Mengecek success dengan sangat longgar
         bool isSuccess = responseData['success'] == true || 
                          responseData['success'] == 'true' || 
                          responseData['status'] == 'success';
 
         if (isSuccess) {
           final prefs = await SharedPreferences.getInstance();
-          // Cari objek data, kalau API mengirim di root ya pakai root (responseData)
           final data = responseData['data'] ?? responseData;
 
-          // Ekstrak token (cek berbagai macam key standar)
           final String? tokenToSave = data['token'] ?? data['jwt'] ?? responseData['token'];
           
           if (tokenToSave != null && tokenToSave.isNotEmpty) {
@@ -576,13 +565,11 @@ class ApiService {
             debugPrint("✅ API LOG: Token berhasil disimpan ke SharedPreferences.");
           }
 
-          // Ekstrak nama
           final String? namaToSave = data['nama_lengkap'] ?? data['name'] ?? responseData['nama_lengkap'];
           if (namaToSave != null) {
             await prefs.setString('nama_lengkap', namaToSave);
           }
           
-          // 🔥 SIMPAN COOKIE SESSION DARI HEADER JIKA DIBERIKAN OLEH SERVER
           final String? rawCookie = response.headers['set-cookie'];
           if (rawCookie != null) {
             await prefs.setString('session_cookie', rawCookie);
@@ -604,7 +591,6 @@ class ApiService {
     
     final String? savedAttendance = prefs.getString('attendance_history');
     
-    // Ini otomatis akan menghapus 'jwt_token' dan 'session_cookie'
     await prefs.clear(); 
     
     if (savedAttendance != null) {
@@ -1138,9 +1124,9 @@ class ApiService {
   }
 
   // =========================================================================
-  // 🔥 MENGAMBIL LAPORAN PENDAPATAN TERAPIS (ENDPOINT BARU)
+  // 🔥 1. MENGAMBIL RINGKASAN LAPORAN PENDAPATAN (ENDPOINT A - Default)
   // =========================================================================
-  Future<Map<String, dynamic>> getTerapisReport({
+  Future<Map<String, dynamic>> getTerapisReportSummary({
     String? startDate,
     String? endDate,
     String? kodeGerai,
@@ -1172,17 +1158,13 @@ class ApiService {
 
       if (response.statusCode == 200) {
         final Map<String, dynamic> data = json.decode(response.body);
-        if (data.containsKey('status')) {
-          data['success'] = data['status'] == 'success';
-        } else {
-          data['success'] = true;
-        }
+        data['success'] = data.containsKey('status') ? data['status'] == 'success' : true;
         return data;
       } else if (response.statusCode == 401) {
         await logout();
         return {'success': false, 'message': 'Sesi habis, silakan login lagi.'};
       } else if (response.statusCode == 405) {
-        return {'success': false, 'message': 'Metode HTTP tidak diizinkan. Hubungi tim backend.'};
+        return {'success': false, 'message': 'Metode HTTP tidak diizinkan.'};
       }
 
       try {
@@ -1190,6 +1172,118 @@ class ApiService {
         return {'success': false, 'message': errorData['message'] ?? 'Gagal mengambil laporan terapis.'};
       } catch (_) {
         return {'success': false, 'message': 'Gagal mengambil laporan terapis (Status: ${response.statusCode})'};
+      }
+    } catch (e) {
+      return {'success': false, 'message': 'Kesalahan jaringan: $e'};
+    }
+  }
+
+  // =========================================================================
+  // 🔥 2. MENGAMBIL DAFTAR DETAIL KOMISI (ENDPOINT B - detail=komisi)
+  // =========================================================================
+  Future<Map<String, dynamic>> getTerapisCommissionDetail({
+    String? startDate,
+    String? endDate,
+    String? kodeGerai,
+  }) async {
+    final String? token = await _getToken();
+    final String? cookie = await _getCookie();
+    if (token == null) return {'success': false, 'message': 'Token tidak ditemukan'};
+
+    final Map<String, String> queryParams = {
+      'detail': 'komisi'
+    };
+    if (startDate != null && startDate.isNotEmpty) queryParams['start_date'] = startDate;
+    if (endDate != null && endDate.isNotEmpty) queryParams['end_date'] = endDate;
+    if (kodeGerai != null && kodeGerai.isNotEmpty) queryParams['kode_gerai'] = kodeGerai;
+
+    final uri = Uri.parse('$baseUrl/get_terapis_report.php')
+        .replace(queryParameters: queryParams);
+
+    try {
+      final response = await http.get(
+        uri,
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json',
+          'Authorization': 'Bearer $token',
+          if (cookie != null) 'Cookie': cookie,
+        },
+      );
+
+      _logDebug(url: uri.toString(), method: "GET", statusCode: response.statusCode, responseBody: response.body);
+
+      if (response.statusCode == 200) {
+        final Map<String, dynamic> data = json.decode(response.body);
+        data['success'] = data.containsKey('status') ? data['status'] == 'success' : true;
+        return data;
+      } else if (response.statusCode == 401) {
+        await logout();
+        return {'success': false, 'message': 'Sesi habis, silakan login lagi.'};
+      }
+
+      try {
+        final errorData = json.decode(response.body);
+        return {'success': false, 'message': errorData['message'] ?? 'Gagal mengambil detail komisi.'};
+      } catch (_) {
+        return {'success': false, 'message': 'Gagal mengambil detail komisi (Status: ${response.statusCode})'};
+      }
+    } catch (e) {
+      return {'success': false, 'message': 'Kesalahan jaringan: $e'};
+    }
+  }
+
+  // =========================================================================
+  // 🔥 3. MENGAMBIL DAFTAR OVERRIDE DETAIL (ENDPOINT C - detail=override)
+  // =========================================================================
+  // CATATAN: Parameter telah diperbarui menjadi 'override' sesuai dokumentasi terbaru.
+  Future<Map<String, dynamic>> getTerapisOverrideDetail({
+    String? startDate,
+    String? endDate,
+    String? kodeGerai,
+  }) async {
+    final String? token = await _getToken();
+    final String? cookie = await _getCookie();
+    if (token == null) return {'success': false, 'message': 'Token tidak ditemukan'};
+
+    // 🔥 Parameter diubah menjadi 'override' sesuai preferensi dokumentasi
+    final Map<String, String> queryParams = {
+      'detail': 'override' 
+    };
+    if (startDate != null && startDate.isNotEmpty) queryParams['start_date'] = startDate;
+    if (endDate != null && endDate.isNotEmpty) queryParams['end_date'] = endDate;
+    if (kodeGerai != null && kodeGerai.isNotEmpty) queryParams['kode_gerai'] = kodeGerai;
+
+    final uri = Uri.parse('$baseUrl/get_terapis_report.php')
+        .replace(queryParameters: queryParams);
+
+    try {
+      final response = await http.get(
+        uri,
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json',
+          'Authorization': 'Bearer $token',
+          if (cookie != null) 'Cookie': cookie,
+        },
+      );
+
+      _logDebug(url: uri.toString(), method: "GET", statusCode: response.statusCode, responseBody: response.body);
+
+      if (response.statusCode == 200) {
+        final Map<String, dynamic> data = json.decode(response.body);
+        data['success'] = data.containsKey('status') ? data['status'] == 'success' : true;
+        return data;
+      } else if (response.statusCode == 401) {
+        await logout();
+        return {'success': false, 'message': 'Sesi habis, silakan login lagi.'};
+      }
+
+      try {
+        final errorData = json.decode(response.body);
+        return {'success': false, 'message': errorData['message'] ?? 'Gagal mengambil detail override.'};
+      } catch (_) {
+        return {'success': false, 'message': 'Gagal mengambil detail override (Status: ${response.statusCode})'};
       }
     } catch (e) {
       return {'success': false, 'message': 'Kesalahan jaringan: $e'};
