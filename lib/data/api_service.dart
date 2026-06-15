@@ -1,30 +1,32 @@
 import 'dart:convert';
-import 'package:flutter/foundation.dart';
+import 'package:flutter/foundation.dart'; // Menyediakan kIsWeb
 import 'package:http/http.dart' as http;
+import 'package:http_parser/http_parser.dart'; // 🔥 DITAMBAHKAN UNTUK FIX UPLOAD WEB
 import 'package:shared_preferences/shared_preferences.dart';
 
 class ApiService {
   static const String baseUrl = "https://dashboard.momnjo.my.id/dev/api_terapis";
 
-  // --- HELPER: MENGAMBIL TOKEN JWT DARI LOKAL ---
+  // base URL Gambar
+  static const String baseImageUrl = "https://dashboard.momnjo.my.id/assets/images";
+
+  // --- HELPER: MENGAMBIL TOKEN & COOKIE ---
   Future<String?> _getToken() async {
     final prefs = await SharedPreferences.getInstance();
     return prefs.getString('jwt_token');
   }
 
-  // --- HELPER: MENGAMBIL COOKIE SESSION DARI LOKAL ---
   Future<String?> _getCookie() async {
     final prefs = await SharedPreferences.getInstance();
     return prefs.getString('session_cookie');
   }
 
-  // --- HELPER: MENGECEK STATUS LOGIN ---
   Future<bool> isLoggedIn() async {
     final String? token = await _getToken();
     return token != null && token.isNotEmpty;
   }
 
-  // --- HELPER: FUNGSI MATA-MATA (DEBUG LOG) KE TERMINAL ---
+  // --- HELPER: FUNGSI MATA-MATA (DEBUG LOG) ---
   void _logDebug({
     required String url,
     Map<String, dynamic>? requestBody,
@@ -39,127 +41,228 @@ class ApiService {
       if (requestBody != null) {
         debugPrint("📦 REQUEST: ${jsonEncode(requestBody)}");
       }
-      debugPrint("✅ RESPONSE: $responseBody");
+      String logResp = responseBody.length > 500 ? "${responseBody.substring(0, 500)}... [TRUNCATED]" : responseBody;
+      debugPrint("✅ RESPONSE: $logResp");
       debugPrint("------------------- 🔚 API LOG END -------------------");
     }
   }
 
   // =========================================================================
-  // 1. FUNGSI UTAMA GET JOBS (All, Active, & History)
+  // CORE HTTP METHODS
   // =========================================================================
-  Future<Map<String, dynamic>> getJobs({String? status, String? search}) async {
+  
+  Future<Map<String, String>> _buildHeaders() async {
     final String? token = await _getToken();
-    final String? cookie = await _getCookie(); 
-    if (token == null) return {'success': false, 'message': 'Unauthorized. Token tidak ditemukan.'};
+    final String? cookie = await _getCookie();
+    
+    return {
+      'Content-Type': 'application/json',
+      'Accept': 'application/json',
+      if (token != null) 'Authorization': 'Bearer $token',
+      if (cookie != null) 'Cookie': cookie,
+    };
+  }
 
-    final Map<String, String> queryParams = {};
-    if (status != null && status.isNotEmpty) queryParams['status'] = status;
-    if (search != null && search.isNotEmpty) queryParams['search'] = search;
-
-    final uri = Uri.parse('$baseUrl/get_all_jobs.php')
-        .replace(queryParameters: queryParams.isNotEmpty ? queryParams : null);
+  Map<String, dynamic> _handleResponse(http.Response response) {
+    if (response.statusCode == 401) {
+      logout(); 
+      return {'success': false, 'message': 'Sesi habis atau tidak valid, silakan login lagi.'};
+    }
 
     try {
-      final response = await http.get(
-        uri,
-        headers: {
-          'Content-Type': 'application/json',
-          'Accept': 'application/json',
-          'Authorization': 'Bearer $token',
-          if (cookie != null) 'Cookie': cookie,
-        },
-      );
-
-      _logDebug(url: uri.toString(), method: "GET", statusCode: response.statusCode, responseBody: response.body);
-
-      if (response.statusCode == 200) {
-        try {
-          return json.decode(response.body);
-        } catch (e) {
-          return {'success': false, 'message': 'Format response server tidak valid.'};
-        }
-      } else if (response.statusCode == 401) {
-        await logout();
-        return {'success': false, 'message': 'Unauthorized. Token tidak valid.'};
-      } else {
-        try {
-          final errorData = json.decode(response.body);
-          return {'success': false, 'message': errorData['message'] ?? 'Gagal mengambil data (Status: ${response.statusCode})'};
-        } catch (_) {
-          return {'success': false, 'message': 'Gagal mengambil data (Status: ${response.statusCode})'};
-        }
+      final data = json.decode(response.body);
+      
+      bool isSuccess = false;
+      if (response.statusCode >= 200 && response.statusCode < 300) {
+        isSuccess = true;
       }
+      
+      if (data is Map<String, dynamic>) {
+        if (data.containsKey('success')) {
+          isSuccess = data['success'] == true || data['success'] == 'true';
+        } else if (data.containsKey('status')) {
+          isSuccess = data['status'] == 'success';
+        }
+        data['success'] = isSuccess;
+        return data;
+      }
+      
+      return {'success': isSuccess, 'data': data};
+    } catch (e) {
+      return {'success': false, 'message': 'Format response server tidak valid (Status: ${response.statusCode}).'};
+    }
+  }
+
+  Future<Map<String, dynamic>> _get(String endpoint, {Map<String, String>? queryParams}) async {
+    final uri = Uri.parse('$baseUrl$endpoint').replace(
+      queryParameters: (queryParams != null && queryParams.isNotEmpty) ? queryParams : null
+    );
+
+    try {
+      final headers = await _buildHeaders();
+      final response = await http.get(uri, headers: headers);
+      _logDebug(url: uri.toString(), method: "GET", statusCode: response.statusCode, responseBody: response.body);
+      return _handleResponse(response);
     } catch (e) {
       return {'success': false, 'message': 'Terjadi kesalahan jaringan: $e'};
     }
+  }
+
+  Future<Map<String, dynamic>> _post(String endpoint, Map<String, dynamic> body, {bool asForm = false}) async {
+    final uri = Uri.parse('$baseUrl$endpoint');
+
+    try {
+      final headers = await _buildHeaders();
+      http.Response response;
+
+      if (asForm) {
+        headers['Content-Type'] = 'application/x-www-form-urlencoded';
+        Map<String, String> formBody = body.map((key, value) => MapEntry(key, value.toString()));
+        response = await http.post(uri, headers: headers, body: formBody);
+      } else {
+        response = await http.post(uri, headers: headers, body: json.encode(body));
+      }
+
+      _logDebug(url: uri.toString(), method: asForm ? "POST (Form)" : "POST", requestBody: body, statusCode: response.statusCode, responseBody: response.body);
+      return _handleResponse(response);
+    } catch (e) {
+      return {'success': false, 'message': 'Terjadi kesalahan jaringan: $e'};
+    }
+  }
+
+  // 🔥 PERBAIKAN: Menambahkan MediaType('image', 'jpeg') untuk validasi Backend PHP
+  Future<Map<String, dynamic>> _multipartPost(String endpoint, Map<String, String> fields, {String? imagePath}) async {
+    final uri = Uri.parse('$baseUrl$endpoint');
+
+    try {
+      var request = http.MultipartRequest('POST', uri);
+      final headers = await _buildHeaders();
+      headers.remove('Content-Type'); 
+      request.headers.addAll(headers);
+      request.fields.addAll(fields);
+
+      if (imagePath != null && imagePath.isNotEmpty) {
+        if (kIsWeb) {
+          final blobUri = Uri.parse(imagePath);
+          final response = await http.get(blobUri);
+          final bytes = response.bodyBytes;
+
+          String filename = 'upload.jpg';
+          try {
+            filename = blobUri.pathSegments.last;
+          } catch (_) {}
+          if (!filename.contains('.')) filename = 'upload.jpg';
+
+          request.files.add(http.MultipartFile.fromBytes(
+            'image',
+            bytes,
+            filename: filename,
+            contentType: MediaType('image', 'jpeg'), // 🔥 FIX UNTUK WEB
+          ));
+        } else {
+          request.files.add(await http.MultipartFile.fromPath(
+            'image', 
+            imagePath,
+            contentType: MediaType('image', 'jpeg'), // 🔥 FIX UNTUK MOBILE
+          ));
+        }
+      }
+
+      _logDebug(url: uri.toString(), method: "POST (Multipart)", requestBody: fields, statusCode: 0, responseBody: "Mengirim data & file...");
+
+      var streamedResponse = await request.send();
+      var response = await http.Response.fromStream(streamedResponse);
+      
+      _logDebug(url: uri.toString(), method: "POST (Multipart Result)", statusCode: response.statusCode, responseBody: response.body);
+      return _handleResponse(response);
+    } catch (e) {
+      return {'success': false, 'message': 'Terjadi kesalahan jaringan saat upload: $e'};
+    }
+  }
+
+  // =========================================================================
+  // LOGOUT, LOGIN & AUTH
+  // =========================================================================
+  Future<void> logout() async {
+    final prefs = await SharedPreferences.getInstance();
+    final String? savedAttendance = prefs.getString('attendance_history');
+    
+    await prefs.clear(); 
+    
+    if (savedAttendance != null) {
+      await prefs.setString('attendance_history', savedAttendance);
+    }
+    debugPrint("------------------- 🚀 API LOG: LOGOUT LOCAL SUCCESS 🚀 -------------------");
+  }
+
+  Future<Map<String, dynamic>> login(String username, String password) async {
+    final result = await _post('/login.php', {
+      'username': username.trim(),
+      'password': password.trim()
+    });
+
+    if (result['success'] == true) {
+      final prefs = await SharedPreferences.getInstance();
+      final data = result['data'] ?? result;
+
+      final String? tokenToSave = data['token'] ?? data['jwt'] ?? result['token'];
+      if (tokenToSave != null && tokenToSave.isNotEmpty) {
+        await prefs.setString('jwt_token', tokenToSave);
+      }
+
+      final String? namaToSave = data['nama_lengkap'] ?? data['name'] ?? result['nama_lengkap'];
+      if (namaToSave != null) {
+        await prefs.setString('nama_lengkap', namaToSave);
+      }
+    }
+    return result;
+  }
+
+  // Ganti Password (Sesuai Dokumentasi)
+  Future<Map<String, dynamic>> changePassword(String oldPassword, String newPassword) async {
+    return await _post('/change_password.php', {
+      'old_password': oldPassword,
+      'new_password': newPassword
+    });
+  }
+
+  // =========================================================================
+  // BATCH 1: JOBS & HISTORY
+  // =========================================================================
+  Future<Map<String, dynamic>> getJobs({String? status, String? search}) async {
+    final Map<String, String> params = {};
+    if (status != null && status.isNotEmpty) params['status'] = status;
+    if (search != null && search.isNotEmpty) params['search'] = search;
+    return await _get('/get_all_jobs.php', queryParams: params);
   }
 
   Future<Map<String, dynamic>> getActiveJobs({String? search}) async {
     return await getJobs(status: 'open', search: search); 
   }
 
-  // =========================================================================
-  // 🔥 2. GET JOB DETAIL
-  // =========================================================================
   Future<Map<String, dynamic>> getJobDetail(String idTransaksi) async {
-    final String? token = await _getToken();
-    final String? cookie = await _getCookie();
-    if (token == null) return {'success': false, 'message': 'Token tidak ditemukan'};
+    if (idTransaksi.trim().isEmpty) return {'success': false, 'message': 'ID Transaksi wajib diisi.'};
+    return await _get('/get_job_detail.php', queryParams: {'id_transaksi': idTransaksi});
+  }
 
-    if (idTransaksi.trim().isEmpty) {
-      return {'success': false, 'message': 'ID Transaksi wajib diisi.'};
-    }
+  // Mengarah ke history.php Sesuai Dokumentasi
+  Future<Map<String, dynamic>> getHistoryList() async {
+    return await _get('/history.php');
+  }
 
-    final String url = '$baseUrl/get_job_detail.php?id_transaksi=$idTransaksi';
-
-    try {
-      final response = await http.get(
-        Uri.parse(url),
-        headers: {
-          'Content-Type': 'application/json',
-          'Accept': 'application/json',
-          'Authorization': 'Bearer $token',
-          if (cookie != null) 'Cookie': cookie,
-        },
-      );
-
-      _logDebug(url: url, method: "GET", statusCode: response.statusCode, responseBody: response.body);
-
-      if (response.statusCode == 200) {
-        return json.decode(response.body);
-      } else if (response.statusCode == 400) {
-        return {'success': false, 'message': 'ID Transaksi tidak valid atau tidak lengkap.'};
-      } else if (response.statusCode == 401) {
-        await logout();
-        return {'success': false, 'message': 'Sesi habis, silakan login lagi.'};
-      }
-      
-      try {
-        final errorData = json.decode(response.body);
-        return {'success': false, 'message': errorData['message'] ?? 'Gagal mengambil detail pekerjaan.'};
-      } catch (_) {
-        return {'success': false, 'message': 'Gagal mengambil detail pekerjaan (Status: ${response.statusCode})'};
-      }
-    } catch (e) {
-      return {'success': false, 'message': 'Kesalahan jaringan: $e'};
-    }
+  Future<Map<String, dynamic>> getHistoryDetail(String idTransaksi) async {
+    return await _get('/history_detail.php', queryParams: {'id_transaksi': idTransaksi});
   }
 
   // =========================================================================
-  // 🔥 UPDATE STATUS SIKLUS KERJA TERAPIS (Arrived, Start, Finish)
+  // BATCH 2: UPDATE STATUS, REPORTS & DATA MEDIS
   // =========================================================================
   Future<Map<String, dynamic>> updateJobStatus({
     required String idTransaksi,
-    required String action, // "arrived", "start", atau "finish"
+    required String action, 
     String? productName,
     String? imagePath,
   }) async {
-    final String? token = await _getToken();
-    final String? cookie = await _getCookie();
-    if (token == null) return {'success': false, 'message': 'Token tidak ditemukan'};
-
-    final String url = '$baseUrl/update_service.php';
-    
     String mappedStatus = action;
     if (action.toLowerCase() == 'arrived') mappedStatus = 'Arrived';
     else if (action.toLowerCase() == 'start') mappedStatus = 'In Progress';
@@ -168,200 +271,56 @@ class ApiService {
     DateTime now = DateTime.now();
     String currentTime = "${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')} ${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}:${now.second.toString().padLeft(2, '0')}";
 
-    try {
-      http.Response response;
+    final Map<String, String> fields = {
+      'id_transaksi': idTransaksi,
+      'id_booking': idTransaksi, 
+      'status': mappedStatus, 
+    };
 
-      if (action == 'arrived' || (imagePath != null && imagePath.isNotEmpty)) {
-        var request = http.MultipartRequest('POST', Uri.parse(url));
-        request.headers['Authorization'] = 'Bearer $token';
-        request.headers['Accept'] = 'application/json';
-        if (cookie != null) request.headers['Cookie'] = cookie; 
+    if (action.toLowerCase() == 'start') fields['waktu_mulai'] = currentTime;
+    if (action.toLowerCase() == 'finish') fields['waktu_selesai'] = currentTime;
+    if (productName != null && productName.isNotEmpty) fields['product_name'] = productName;
 
-        request.fields['id_transaksi'] = idTransaksi;
-        request.fields['id_booking'] = idTransaksi; 
-        request.fields['status'] = mappedStatus; 
-        
-        if (action.toLowerCase() == 'start') {
-           request.fields['waktu_mulai'] = currentTime;
-        } else if (action.toLowerCase() == 'finish') {
-           request.fields['waktu_selesai'] = currentTime;
-        }
-
-        if (imagePath != null && imagePath.isNotEmpty) {
-          request.files.add(await http.MultipartFile.fromPath('image', imagePath));
-        }
-
-        _logDebug(url: url, method: "POST (Multipart)", requestBody: request.fields, statusCode: 0, responseBody: "Mengirim data tiba & foto...");
-
-        var streamedResponse = await request.send();
-        response = await http.Response.fromStream(streamedResponse);
-      } 
-      else {
-        final Map<String, dynamic> body = {
-          'id_transaksi': idTransaksi,
-          'id_booking': idTransaksi, 
-          'status': mappedStatus, 
-        };
-        
-        if (action.toLowerCase() == 'start') {
-           body['waktu_mulai'] = currentTime;
-        } else if (action.toLowerCase() == 'finish') {
-           body['waktu_selesai'] = currentTime;
-        }
-
-        if (productName != null && productName.isNotEmpty) {
-          body['product_name'] = productName;
-        }
-
-        response = await http.post(
-          Uri.parse(url),
-          headers: {
-            'Content-Type': 'application/json',
-            'Accept': 'application/json',
-            'Authorization': 'Bearer $token',
-            if (cookie != null) 'Cookie': cookie,
-          },
-          body: json.encode(body),
-        );
-      }
-
-      _logDebug(url: url, method: "POST", statusCode: response.statusCode, responseBody: response.body);
-
-      if (response.statusCode == 200 || response.statusCode == 400 || response.statusCode == 401 || response.statusCode == 404) {
-        try {
-          final Map<String, dynamic> data = json.decode(response.body);
-          
-          bool isSuccess = false;
-          if (data['success'] == true || data['success'] == 'true') {
-             isSuccess = true;
-          } else if (data['status'] == 'success') {
-             isSuccess = true;
-          }
-          
-          data['success'] = isSuccess;
-          return data;
-        } catch (e) {
-          String partialError = response.body;
-          if (partialError.length > 100) partialError = '${partialError.substring(0, 100)}...';
-          return {'success': false, 'message': 'Server mengembalikan error: $partialError'};
-        }
-      } else {
-        return {'success': false, 'message': 'Server Error (Status: ${response.statusCode})'};
-      }
-    } catch (e) {
-      return {'success': false, 'message': 'Koneksi terputus: $e'};
+    if (action == 'arrived' || (imagePath != null && imagePath.isNotEmpty)) {
+      return await _multipartPost('/update_service.php', fields, imagePath: imagePath);
+    } else {
+      return await _post('/update_service.php', fields);
     }
   }
 
-  // =========================================================================
-  // MENGAMBIL STATISTIK TERAPIS (HOME SCREEN)
-  // =========================================================================
-  Future<Map<String, dynamic>> getStats() async {
-    final String? token = await _getToken();
-    final String? cookie = await _getCookie();
-    if (token == null) return {'success': false, 'message': 'Token tidak ditemukan'};
-
-    final String url = '$baseUrl/get_stats.php';
-
-    try {
-      final response = await http.get(
-        Uri.parse(url),
-        headers: {
-          'Content-Type': 'application/json',
-          'Accept': 'application/json',
-          'Authorization': 'Bearer $token',
-          if (cookie != null) 'Cookie': cookie,
-        },
-      );
-
-      _logDebug(url: url, method: "GET", statusCode: response.statusCode, responseBody: response.body);
-
-      if (response.statusCode == 200) return json.decode(response.body);
-      
-      try {
-        final errorData = json.decode(response.body);
-        return {'success': false, 'message': errorData['message'] ?? 'Gagal memuat statistik'};
-      } catch (_) {
-        return {'success': false, 'message': 'Gagal memuat statistik (Status: ${response.statusCode})'};
-      }
-    } catch (e) {
-      return {'success': false, 'message': 'Terjadi kesalahan jaringan'};
-    }
-  }
-
-  // =========================================================================
-  // UPDATE STATUS BOOKING KESELURUHAN (MENDUKUNG UPLOAD FOTO)
-  // =========================================================================
   Future<Map<String, dynamic>> updateBookingStatus({
     required String idBooking,
     required String newStatus,
     String? imagePath,
   }) async {
-    final String? token = await _getToken();
-    final String? cookie = await _getCookie();
-    if (token == null) return {'success': false, 'message': 'Token tidak ditemukan'};
-
-    final String url = '$baseUrl/update_booking_status.php';
-
-    try {
-      http.Response response;
-
-      if (imagePath != null && imagePath.isNotEmpty) {
-        var request = http.MultipartRequest('POST', Uri.parse(url));
-        request.headers['Authorization'] = 'Bearer $token';
-        request.headers['Accept'] = 'application/json';
-        if (cookie != null) request.headers['Cookie'] = cookie;
-        
-        request.fields['id_booking'] = idBooking; 
-        request.fields['status'] = newStatus;
-        
-        request.files.add(await http.MultipartFile.fromPath('image', imagePath)); 
-
-        _logDebug(url: url, method: "POST (Multipart)", requestBody: request.fields, statusCode: 0, responseBody: "Mengirim foto...");
-
-        var streamedResponse = await request.send();
-        response = await http.Response.fromStream(streamedResponse);
-      } else {
-        final Map<String, dynamic> body = {
-          'id_booking': idBooking,
-          'status': newStatus,
-        };
-        
-        response = await http.post(
-          Uri.parse(url),
-          headers: {
-            'Content-Type': 'application/json',
-            'Accept': 'application/json',
-            'Authorization': 'Bearer $token',
-            if (cookie != null) 'Cookie': cookie,
-          },
-          body: json.encode(body),
-        );
-      }
-
-      _logDebug(url: url, method: "POST", statusCode: response.statusCode, responseBody: response.body);
-
-      if (response.statusCode == 200 || response.statusCode == 201) {
-        return json.decode(response.body);
-      } else if (response.statusCode == 401) {
-        await logout();
-        return {'success': false, 'message': 'Unauthorized. Token tidak valid atau kadaluarsa.'};
-      }
-      
-      try {
-        final errorData = json.decode(response.body);
-        return {'success': false, 'message': errorData['message'] ?? 'Gagal update status booking'};
-      } catch (_) {
-        return {'success': false, 'message': 'Gagal update status booking (Status: ${response.statusCode})'};
-      }
-    } catch (e) {
-      return {'success': false, 'message': 'Kesalahan jaringan: $e'};
+    if (imagePath != null && imagePath.isNotEmpty) {
+      return await _multipartPost('/update_booking_status.php', {
+        'id_booking': idBooking,
+        'status': newStatus,
+      }, imagePath: imagePath);
     }
+    return await _post('/update_booking_status.php', {
+      'id_booking': idBooking,
+      'status': newStatus,
+    });
   }
 
-  // =========================================================================
-  // MENYIMPAN DATA MEDIS (Pemeriksaan Klien)
-  // =========================================================================
+  // Mengarah ke rate_customer.php Sesuai Dokumentasi
+  Future<Map<String, dynamic>> rateCustomer({
+    required String idTransaksi,
+    required int rating,
+    required List<String> tags,
+    required String notes,
+  }) async {
+    return await _post('/rate_customer.php', {
+      'id_transaksi': idTransaksi,
+      'rating': rating > 0 ? rating : 5, 
+      'tags': tags,
+      'notes': notes,
+    });
+  }
+
+  // Tetap asForm: true agar $_POST['id_customer'] tidak dianggap kosong kalau id-nya "0"
   Future<Map<String, dynamic>> storeDataMedis({
     required String idTransaksi,
     required String idCustomer,
@@ -373,295 +332,90 @@ class ApiService {
     String? diastolik,
     String? catatan,
   }) async {
-    final String? token = await _getToken();
-    final String? cookie = await _getCookie();
-    if (token == null) return {'success': false, 'message': 'Token tidak ditemukan'};
-
     if (idTransaksi.trim().isEmpty || idCustomer.trim().isEmpty) {
       return {'success': false, 'message': 'ID Transaksi/Customer kosong.'};
     }
 
     String finalTekanan = tekanan ?? '';
-    if (finalTekanan.isEmpty && sistolik != null && diastolik != null) {
-      if (sistolik.isNotEmpty && diastolik.isNotEmpty) {
-        finalTekanan = '$sistolik/$diastolik';
-      }
+    if (finalTekanan.isEmpty && sistolik != null && diastolik != null && sistolik.isNotEmpty && diastolik.isNotEmpty) {
+      finalTekanan = '$sistolik/$diastolik';
     }
 
-    final String url = '$baseUrl/store_data_medis.php';
-    final Map<String, dynamic> payloadData = {
+    final Map<String, String> fields = {
       'id_transaksi': idTransaksi,
       'id_customer': idCustomer,
-      if (suhu != null && suhu.isNotEmpty) 'suhu': suhu,
-      if (tinggi != null && tinggi.isNotEmpty) 'tinggi': tinggi,
-      if (berat != null && berat.isNotEmpty) 'berat': berat,
-      if (finalTekanan.isNotEmpty) 'tekanan': finalTekanan,
-      if (catatan != null && catatan.isNotEmpty) 'catatan': catatan,
     };
+    
+    if (suhu != null && suhu.isNotEmpty) fields['suhu'] = suhu;
+    if (tinggi != null && tinggi.isNotEmpty) fields['tinggi'] = tinggi;
+    if (berat != null && berat.isNotEmpty) fields['berat'] = berat;
+    if (finalTekanan.isNotEmpty) fields['tekanan'] = finalTekanan;
+    if (catatan != null && catatan.isNotEmpty) fields['catatan'] = catatan;
 
-    try {
-      final response = await http.post(
-        Uri.parse(url),
-        headers: {
-          'Content-Type': 'application/json',
-          'Accept': 'application/json',
-          'Authorization': 'Bearer $token',
-          if (cookie != null) 'Cookie': cookie,
-        },
-        body: json.encode(payloadData),
-      );
+    return await _post('/store_data_medis.php', fields, asForm: true);
+  }
 
-      _logDebug(url: url, method: "POST", requestBody: payloadData, statusCode: response.statusCode, responseBody: response.body);
-
-      if (response.statusCode == 201 || response.statusCode == 200) {
-        return json.decode(response.body);
-      } else {
-        try {
-          final errorData = json.decode(response.body);
-          return {'success': false, 'message': errorData['message'] ?? 'Server Error'};
-        } catch (_) {
-          return {'success': false, 'message': 'Server Error (Status: ${response.statusCode})'};
-        }
-      }
-    } catch (e) {
-      return {'success': false, 'message': 'Koneksi terputus: $e'};
+  // Ambil data medis (Sesuai Dokumentasi)
+  Future<Map<String, dynamic>> getStoredDataMedis({String? idTransaksi}) async {
+    final Map<String, String> params = {};
+    if (idTransaksi != null && idTransaksi.isNotEmpty) {
+      params['id_transaksi'] = idTransaksi;
     }
+    return await _get('/get_stored_data_medis.php', queryParams: params);
   }
 
   // =========================================================================
-  // MENGAMBIL LIST RIWAYAT PEKERJAAN (HISTORY)
+  // BATCH 3: ATTENDANCE, PROFILE & OTHER INFO
   // =========================================================================
-  Future<Map<String, dynamic>> getHistoryList({String? search}) async {
-    return await getJobs(status: 'closed', search: search);
-  }
+  Future<Map<String, dynamic>> getStats() async => await _get('/get_stats.php');
+  Future<Map<String, dynamic>> getProfile() async => await _get('/get_profile.php');
+  Future<Map<String, dynamic>> getDataDiri() async => await _get('/get_data_diri.php');
+  Future<Map<String, dynamic>> getCarousel() async => await _get('/get_carousel.php');
+  Future<Map<String, dynamic>> checkAttendanceStatus() async => await _get('/store_absensi.php');
+  Future<Map<String, dynamic>> getGeraiWa() async => await _get('/get_gerai_wa.php');
 
-  // =========================================================================
-  // MENGAMBIL DETAIL RIWAYAT PEKERJAAN (HISTORY DETAIL)
-  // =========================================================================
-  Future<Map<String, dynamic>> getHistoryDetail(String idTransaksi) async {
-    final String? token = await _getToken();
-    final String? cookie = await _getCookie();
-    if (token == null) return {'success': false, 'message': 'Token tidak ditemukan'};
-
-    final String url = '$baseUrl/history_detail.php?id_transaksi=$idTransaksi';
-
-    try {
-      final response = await http.get(
-        Uri.parse(url),
-        headers: {
-          'Content-Type': 'application/json',
-          'Accept': 'application/json',
-          'Authorization': 'Bearer $token',
-          if (cookie != null) 'Cookie': cookie,
-        },
-      );
-
-      _logDebug(url: url, method: "GET", statusCode: response.statusCode, responseBody: response.body);
-
-      if (response.statusCode == 200) {
-        return json.decode(response.body);
-      }
-      
-      try {
-        final errorData = json.decode(response.body);
-        return {'success': false, 'message': errorData['message'] ?? 'Gagal mengambil detail history.'};
-      } catch (_) {
-        return {'success': false, 'message': 'Gagal mengambil detail history (Status: ${response.statusCode})'};
-      }
-    } catch (e) {
-      return {'success': false, 'message': 'Kesalahan jaringan: $e'};
-    }
-  }
-
-  // =========================================================================
-  // RATE CUSTOMER (LAPORAN KUNJUNGAN)
-  // =========================================================================
-  Future<Map<String, dynamic>> rateCustomer({
-    required String idTransaksi,
-    required int rating,
-    required List<String> tags,
-    required String notes,
+  Future<Map<String, dynamic>> submitAttendance({
+    required String action,
+    String? catatan,
+    String? imagePath,
+    String? lokasi,
   }) async {
-    final String? token = await _getToken();
-    final String? cookie = await _getCookie();
-    if (token == null) return {'success': false, 'message': 'Token tidak ditemukan'};
+    final fields = {'action': action};
+    if (catatan != null && catatan.isNotEmpty) fields['catatan'] = catatan;
+    if (lokasi != null && lokasi.isNotEmpty) fields['lokasi'] = lokasi;
 
-    final String url = '$baseUrl/update_service.php';
-    final Map<String, dynamic> body = {
-      'id_transaksi': idTransaksi,
-      'id_booking': idTransaksi,
-      'status': 'Completed', 
-      'rating': rating > 0 ? rating : 5, 
-      'tags': tags,
-      'notes': notes,
-    };
-
-    try {
-      final response = await http.post(
-        Uri.parse(url), 
-        headers: {
-          'Content-Type': 'application/json',
-          'Accept': 'application/json',
-          'Authorization': 'Bearer $token',
-          if (cookie != null) 'Cookie': cookie,
-        },
-        body: json.encode(body),
-      );
-
-      _logDebug(url: url, method: "POST", requestBody: body, statusCode: response.statusCode, responseBody: response.body);
-
-      if (response.statusCode == 200) {
-        return json.decode(response.body);
-      }
-      
-      try {
-        final errorData = json.decode(response.body);
-        return {'success': false, 'message': errorData['message'] ?? 'Gagal mengirim laporan kunjungan.'};
-      } catch (_) {
-        return {'success': false, 'message': 'Gagal mengirim laporan kunjungan (Status: ${response.statusCode})'};
-      }
-    } catch (e) {
-      return {'success': false, 'message': 'Kesalahan jaringan: $e'};
+    if (imagePath != null && imagePath.isNotEmpty) {
+      return await _multipartPost('/store_absensi.php', fields, imagePath: imagePath);
     }
+    return await _post('/store_absensi.php', fields);
+  }
+
+  Future<Map<String, dynamic>> getAttendanceHistory({String? bulan, String? tahun}) async {
+    final Map<String, String> params = {};
+    if (bulan != null && bulan.isNotEmpty) params['bulan'] = bulan;
+    if (tahun != null && tahun.isNotEmpty) params['tahun'] = tahun;
+    return await _get('/get_history_absensi.php', queryParams: params);
   }
 
   // =========================================================================
-  // LOGIN (MENDUKUNG PENYIMPANAN COOKIE SESSION)
+  // BATCH 4: FINANCE & PAYOUT
   // =========================================================================
-  Future<Map<String, dynamic>> login(String username, String password) async {
-    final String url = '$baseUrl/login.php';
-    final Map<String, dynamic> body = {
-      'username': username.trim(),
-      'password': password.trim()
-    };
-
-    try {
-      final response = await http.post(
-        Uri.parse(url),
-        headers: {
-          'Content-Type': 'application/json',
-          'Accept': 'application/json',
-        },
-        body: json.encode(body),
-      );
-
-      _logDebug(url: url, method: "POST", requestBody: body, statusCode: response.statusCode, responseBody: response.body);
-
-      if (response.statusCode == 200 || response.statusCode == 201) {
-        final responseData = json.decode(response.body);
-
-        bool isSuccess = responseData['success'] == true || 
-                         responseData['success'] == 'true' || 
-                         responseData['status'] == 'success';
-
-        if (isSuccess) {
-          final prefs = await SharedPreferences.getInstance();
-          final data = responseData['data'] ?? responseData;
-
-          final String? tokenToSave = data['token'] ?? data['jwt'] ?? responseData['token'];
-          
-          if (tokenToSave != null && tokenToSave.isNotEmpty) {
-            await prefs.setString('jwt_token', tokenToSave);
-            debugPrint("✅ API LOG: Token berhasil disimpan ke SharedPreferences.");
-          }
-
-          final String? namaToSave = data['nama_lengkap'] ?? data['name'] ?? responseData['nama_lengkap'];
-          if (namaToSave != null) {
-            await prefs.setString('nama_lengkap', namaToSave);
-          }
-          
-          final String? rawCookie = response.headers['set-cookie'];
-          if (rawCookie != null) {
-            await prefs.setString('session_cookie', rawCookie);
-          }
-        }
-        return responseData;
-      }
-      return {'success': false, 'message': 'Username atau password salah.'};
-    } catch (e) {
-      return {'success': false, 'message': 'Terjadi kesalahan jaringan atau sistem: $e'};
-    }
+  Future<Map<String, dynamic>> getBalance({String? source, String? startDate, String? endDate}) async {
+    final Map<String, String> params = {};
+    if (source != null && source.isNotEmpty) params['source'] = source;
+    if (startDate != null && startDate.isNotEmpty) params['start_date'] = startDate;
+    if (endDate != null && endDate.isNotEmpty) params['end_date'] = endDate;
+    return await _get('/get_balance.php', queryParams: params);
   }
 
-  // =========================================================================
-  // LOGOUT
-  // =========================================================================
-  Future<void> logout() async {
-    final prefs = await SharedPreferences.getInstance();
-    
-    final String? savedAttendance = prefs.getString('attendance_history');
-    
-    await prefs.clear(); 
-    
-    if (savedAttendance != null) {
-      await prefs.setString('attendance_history', savedAttendance);
-    }
-    
-    debugPrint("------------------- 🚀 API LOG: LOGOUT LOCAL SUCCESS 🚀 -------------------");
+  // Get Earnings (Sesuai Dokumentasi)
+  Future<Map<String, dynamic>> getEarnings({String? startDate, String? endDate}) async {
+    final Map<String, String> params = {};
+    if (startDate != null && startDate.isNotEmpty) params['start_date'] = startDate;
+    if (endDate != null && endDate.isNotEmpty) params['end_date'] = endDate;
+    return await _get('/get_earnings.php', queryParams: params);
   }
 
-  // =========================================================================
-  // MENGAMBIL SALDO TERAPIS (GET BALANCE LAMA)
-  // =========================================================================
-  Future<Map<String, dynamic>> getBalance({
-    String? source,
-    String? startDate,
-    String? endDate,
-  }) async {
-    final String? token = await _getToken();
-    final String? cookie = await _getCookie();
-    if (token == null) return {'success': false, 'message': 'Token tidak ditemukan'};
-
-    final Map<String, String> queryParams = {};
-    if (source != null && source.isNotEmpty) queryParams['source'] = source;
-    if (startDate != null && startDate.isNotEmpty) queryParams['start_date'] = startDate;
-    if (endDate != null && endDate.isNotEmpty) queryParams['end_date'] = endDate;
-
-    final uri = Uri.parse('$baseUrl/get_balance.php')
-        .replace(queryParameters: queryParams.isNotEmpty ? queryParams : null);
-
-    try {
-      final response = await http.get(
-        uri,
-        headers: {
-          'Content-Type': 'application/json',
-          'Accept': 'application/json',
-          'Authorization': 'Bearer $token',
-          if (cookie != null) 'Cookie': cookie,
-        },
-      );
-
-      _logDebug(url: uri.toString(), method: "GET", statusCode: response.statusCode, responseBody: response.body);
-
-      if (response.statusCode == 200) {
-        final Map<String, dynamic> data = json.decode(response.body);
-        
-        if (data.containsKey('status')) {
-           data['success'] = data['status'] == 'success';
-        } else {
-           data['success'] = true; 
-        }
-        
-        return data;
-      } else if (response.statusCode == 401) {
-        await logout();
-        return {'success': false, 'message': 'Sesi habis, silakan login lagi.'};
-      }
-      
-      try {
-        final errorData = json.decode(response.body);
-        return {'success': false, 'message': errorData['message'] ?? 'Gagal mengambil saldo.'};
-      } catch (_) {
-        return {'success': false, 'message': 'Gagal mengambil saldo (Status: ${response.statusCode})'};
-      }
-    } catch (e) {
-      return {'success': false, 'message': 'Kesalahan jaringan: $e'};
-    }
-  }
-
-  // =========================================================================
-  // SUBMIT PENARIKAN DANA (PAYOUT REQUEST)
-  // =========================================================================
   Future<Map<String, dynamic>> submitPayoutRequest({
     required String jenisPayout,
     required int amount,
@@ -670,623 +424,52 @@ class ApiService {
     required String accountName,
     String? notes,
   }) async {
-    final String? token = await _getToken();
-    final String? cookie = await _getCookie();
-    if (token == null) return {'success': false, 'message': 'Token tidak ditemukan'};
-
-    final String url = '$baseUrl/request_payout.php';
-    
-    final Map<String, dynamic> body = {
+    return await _post('/request_payout.php', {
       'jenis_payout': jenisPayout,
       'requested_amount': amount,
       'bank_account': bank,
       'account_number': accountNumber,
       'account_holder_name': accountName,
       if (notes != null && notes.isNotEmpty) 'note': notes,
-    };
-
-    try {
-      final response = await http.post(
-        Uri.parse(url), 
-        headers: {
-          'Content-Type': 'application/json',
-          'Accept': 'application/json',
-          'Authorization': 'Bearer $token',
-          if (cookie != null) 'Cookie': cookie,
-        },
-        body: json.encode(body),
-      );
-
-      _logDebug(url: url, method: "POST", requestBody: body, statusCode: response.statusCode, responseBody: response.body);
-
-      if (response.statusCode == 200 || response.statusCode == 201) {
-        return json.decode(response.body);
-      }
-      
-      try {
-        final errorData = json.decode(response.body);
-        return {
-          'success': false, 
-          'status': errorData['status'], 
-          'message': errorData['message'] ?? 'Gagal memproses penarikan.'
-        };
-      } catch (_) {
-        return {'success': false, 'message': 'Gagal memproses penarikan (Status: ${response.statusCode})'};
-      }
-    } catch (e) {
-      return {'success': false, 'message': 'Kesalahan jaringan: $e'};
-    }
+    });
   }
 
-  // =========================================================================
-  // MENGAMBIL RIWAYAT PENARIKAN (PAYOUT HISTORY)
-  // =========================================================================
-  Future<Map<String, dynamic>> getPayoutHistory({
-    String? status,
-    String? startDate,
-    String? endDate,
-  }) async {
-    final String? token = await _getToken();
-    final String? cookie = await _getCookie();
-    if (token == null) return {'success': false, 'message': 'Token tidak ditemukan'};
-
-    final Map<String, String> queryParams = {};
-    if (status != null && status.isNotEmpty) queryParams['status'] = status;
-    if (startDate != null && startDate.isNotEmpty) queryParams['start_date'] = startDate;
-    if (endDate != null && endDate.isNotEmpty) queryParams['end_date'] = endDate;
-
-    final uri = Uri.parse('$baseUrl/get_payout_history.php')
-        .replace(queryParameters: queryParams.isNotEmpty ? queryParams : null);
-
-    try {
-      final response = await http.get(
-        uri,
-        headers: {
-          'Content-Type': 'application/json',
-          'Accept': 'application/json',
-          'Authorization': 'Bearer $token',
-          if (cookie != null) 'Cookie': cookie,
-        },
-      );
-
-      _logDebug(url: uri.toString(), method: "GET", statusCode: response.statusCode, responseBody: response.body);
-
-      if (response.statusCode == 200) {
-        final Map<String, dynamic> data = json.decode(response.body);
-        
-        if (data.containsKey('status')) {
-           data['success'] = data['status'] == 'success';
-        } else {
-           data['success'] = true;
-        }
-
-        return data;
-      } else if (response.statusCode == 401) {
-        await logout();
-        return {'success': false, 'message': 'Sesi habis, silakan login lagi.'};
-      }
-      
-      try {
-        final errorData = json.decode(response.body);
-        return {'success': false, 'message': errorData['message'] ?? 'Gagal mengambil riwayat penarikan dana.'};
-      } catch (_) {
-        return {'success': false, 'message': 'Gagal mengambil riwayat penarikan dana (Status: ${response.statusCode})'};
-      }
-    } catch (e) {
-      return {'success': false, 'message': 'Kesalahan jaringan: $e'};
-    }
+  Future<Map<String, dynamic>> getPayoutHistory({String? status, String? startDate, String? endDate}) async {
+    final Map<String, String> params = {};
+    if (status != null && status.isNotEmpty) params['status'] = status;
+    if (startDate != null && startDate.isNotEmpty) params['start_date'] = startDate;
+    if (endDate != null && endDate.isNotEmpty) params['end_date'] = endDate;
+    return await _get('/get_payout_history.php', queryParams: params);
   }
 
-  // =========================================================================
-  // MENGAMBIL DETAIL PENARIKAN (PAYOUT DETAIL)
-  // =========================================================================
   Future<Map<String, dynamic>> getPayoutDetail(int idPayout) async {
-    final String? token = await _getToken();
-    final String? cookie = await _getCookie();
-    if (token == null) return {'success': false, 'message': 'Token tidak ditemukan'};
-
-    final String url = '$baseUrl/get_detail_payout.php?id_payout=$idPayout';
-
-    try {
-      final response = await http.get(
-        Uri.parse(url),
-        headers: {
-          'Content-Type': 'application/json',
-          'Accept': 'application/json',
-          'Authorization': 'Bearer $token',
-          if (cookie != null) 'Cookie': cookie,
-        },
-      );
-
-      _logDebug(url: url, method: "GET", statusCode: response.statusCode, responseBody: response.body);
-
-      if (response.statusCode == 200 || response.statusCode == 400 || response.statusCode == 403 || response.statusCode == 404) {
-        return json.decode(response.body);
-      } else if (response.statusCode == 401) {
-        await logout();
-        return {'success': false, 'message': 'Sesi habis, silakan login lagi.'};
-      }
-
-      try {
-        final errorData = json.decode(response.body);
-        return {'success': false, 'message': errorData['message'] ?? 'Gagal mengambil detail penarikan dana.'};
-      } catch (_) {
-        return {'success': false, 'message': 'Gagal mengambil detail penarikan dana (Status: ${response.statusCode})'};
-      }
-    } catch (e) {
-      return {'success': false, 'message': 'Kesalahan jaringan: $e'};
-    }
+    return await _get('/get_detail_payout.php', queryParams: {'id_payout': idPayout.toString()});
   }
 
   // =========================================================================
-  // MENGAMBIL PROFIL TERAPIS (GET PROFILE)
+  // BATCH 5: TERAPIS REPORTS
   // =========================================================================
-  Future<Map<String, dynamic>> getProfile() async {
-    final String? token = await _getToken();
-    final String? cookie = await _getCookie();
-    if (token == null) return {'success': false, 'message': 'Token tidak ditemukan'};
-
-    final String url = '$baseUrl/get_profile.php';
-
-    try {
-      final response = await http.get(
-        Uri.parse(url),
-        headers: {
-          'Content-Type': 'application/json',
-          'Accept': 'application/json',
-          'Authorization': 'Bearer $token',
-          if (cookie != null) 'Cookie': cookie,
-        },
-      );
-
-      _logDebug(url: url, method: "GET", statusCode: response.statusCode, responseBody: response.body);
-
-      if (response.statusCode == 200 || response.statusCode == 404) {
-        return json.decode(response.body);
-      } else if (response.statusCode == 401) {
-        await logout(); 
-        return {'success': false, 'message': 'Sesi habis, silakan login lagi.'};
-      }
-
-      try {
-        final errorData = json.decode(response.body);
-        return {'success': false, 'message': errorData['message'] ?? 'Gagal mengambil profil.'};
-      } catch (_) {
-        return {'success': false, 'message': 'Gagal mengambil profil (Status: ${response.statusCode})'};
-      }
-    } catch (e) {
-      return {'success': false, 'message': 'Kesalahan jaringan: $e'};
-    }
+  Future<Map<String, dynamic>> getTerapisReportSummary({String? startDate, String? endDate, String? kodeGerai}) async {
+    final Map<String, String> params = {};
+    if (startDate != null && startDate.isNotEmpty) params['start_date'] = startDate;
+    if (endDate != null && endDate.isNotEmpty) params['end_date'] = endDate;
+    if (kodeGerai != null && kodeGerai.isNotEmpty) params['kode_gerai'] = kodeGerai;
+    return await _get('/get_terapis_report.php', queryParams: params);
   }
 
-  // =========================================================================
-  // MENGAMBIL DATA DIRI TERAPIS (GET DATA DIRI)
-  // =========================================================================
-  Future<Map<String, dynamic>> getDataDiri() async {
-    final String? token = await _getToken();
-    final String? cookie = await _getCookie();
-    if (token == null) return {'success': false, 'message': 'Token tidak ditemukan'};
-
-    final String url = '$baseUrl/get_data_diri.php';
-
-    try {
-      final response = await http.get(
-        Uri.parse(url),
-        headers: {
-          'Content-Type': 'application/json',
-          'Accept': 'application/json',
-          'Authorization': 'Bearer $token',
-          if (cookie != null) 'Cookie': cookie,
-        },
-      );
-
-      _logDebug(url: url, method: "GET", statusCode: response.statusCode, responseBody: response.body);
-
-      if (response.statusCode == 200 || response.statusCode == 404) {
-        return json.decode(response.body);
-      } else if (response.statusCode == 401) {
-        await logout(); 
-        return {'success': false, 'message': 'Sesi habis, silakan login lagi.'};
-      }
-
-      try {
-        final errorData = json.decode(response.body);
-        return {'success': false, 'message': errorData['message'] ?? 'Gagal mengambil data diri.'};
-      } catch (_) {
-        return {'success': false, 'message': 'Gagal mengambil data diri (Status: ${response.statusCode})'};
-      }
-    } catch (e) {
-      return {'success': false, 'message': 'Kesalahan jaringan: $e'};
-    }
+  Future<Map<String, dynamic>> getTerapisCommissionDetail({String? startDate, String? endDate, String? kodeGerai}) async {
+    final Map<String, String> params = {'detail': 'komisi'};
+    if (startDate != null && startDate.isNotEmpty) params['start_date'] = startDate;
+    if (endDate != null && endDate.isNotEmpty) params['end_date'] = endDate;
+    if (kodeGerai != null && kodeGerai.isNotEmpty) params['kode_gerai'] = kodeGerai;
+    return await _get('/get_terapis_report.php', queryParams: params);
   }
 
-  // =========================================================================
-  // MENGAMBIL DATA CAROUSEL (BANNER TERAPIS)
-  // =========================================================================
-  Future<Map<String, dynamic>> getCarousel() async {
-    final String url = '$baseUrl/get_carousel.php';
-    final String? cookie = await _getCookie();
-
-    try {
-      final response = await http.get(
-        Uri.parse(url),
-        headers: {
-          'Content-Type': 'application/json',
-          'Accept': 'application/json',
-          if (cookie != null) 'Cookie': cookie,
-        },
-      );
-
-      _logDebug(
-          url: url,
-          method: "GET",
-          statusCode: response.statusCode,
-          responseBody: response.body);
-
-      if (response.statusCode == 200) {
-        try {
-          return json.decode(response.body);
-        } catch (e) {
-          return {'success': false, 'message': 'Format response server tidak valid.'};
-        }
-      } else {
-        try {
-          final errorData = json.decode(response.body);
-          return {
-            'success': false,
-            'message': errorData['message'] ?? 'Gagal mengambil data carousel.'
-          };
-        } catch (_) {
-          return {
-            'success': false,
-            'message': 'Gagal mengambil data carousel (Status: ${response.statusCode})'
-          };
-        }
-      }
-    } catch (e) {
-      return {'success': false, 'message': 'Kesalahan jaringan: $e'};
-    }
-  }
-
-  // =========================================================================
-  // 🔥 CEK STATUS ABSENSI HARI INI (On Duty / Off Duty)
-  // =========================================================================
-  Future<Map<String, dynamic>> checkAttendanceStatus() async {
-    final String? token = await _getToken();
-    final String? cookie = await _getCookie();
-    if (token == null) return {'success': false, 'message': 'Token tidak ditemukan'};
-
-    final String url = '$baseUrl/store_absensi.php';
-
-    try {
-      final response = await http.get(
-        Uri.parse(url),
-        headers: {
-          'Content-Type': 'application/json',
-          'Accept': 'application/json',
-          'Authorization': 'Bearer $token',
-          if (cookie != null) 'Cookie': cookie,
-        },
-      );
-
-      _logDebug(url: url, method: "GET", statusCode: response.statusCode, responseBody: response.body);
-
-      if (response.statusCode == 200) {
-        return json.decode(response.body);
-      } else if (response.statusCode == 401) {
-        await logout();
-        return {'success': false, 'message': 'Sesi habis, silakan login lagi.'};
-      }
-
-      try {
-        final errorData = json.decode(response.body);
-        return {'success': false, 'message': errorData['message'] ?? 'Gagal mengambil status absensi.'};
-      } catch (_) {
-        return {'success': false, 'message': 'Gagal mengambil status absensi (Status: ${response.statusCode})'};
-      }
-    } catch (e) {
-      return {'success': false, 'message': 'Kesalahan jaringan: $e'};
-    }
-  }
-
-  // =========================================================================
-  // 🔥 KIRIM ABSENSI (Check-In atau Check-Out) MENDUKUNG FOTO & LOKASI
-  // =========================================================================
-  Future<Map<String, dynamic>> submitAttendance({
-    required String action, // "check_in" atau "check_out"
-    String? catatan,
-    String? imagePath,
-    String? lokasi,
-  }) async {
-    final String? token = await _getToken();
-    final String? cookie = await _getCookie();
-    if (token == null) return {'success': false, 'message': 'Token tidak ditemukan'};
-
-    final String url = '$baseUrl/store_absensi.php';
-
-    try {
-      http.Response response;
-
-      // Jika ada gambar, gunakan request berjenis Multipart
-      if (imagePath != null && imagePath.isNotEmpty) {
-        var request = http.MultipartRequest('POST', Uri.parse(url));
-        request.headers['Authorization'] = 'Bearer $token';
-        request.headers['Accept'] = 'application/json';
-        if (cookie != null) request.headers['Cookie'] = cookie;
-
-        request.fields['action'] = action;
-        if (catatan != null && catatan.isNotEmpty) request.fields['catatan'] = catatan;
-        if (lokasi != null && lokasi.isNotEmpty) request.fields['lokasi'] = lokasi;
-
-        request.files.add(await http.MultipartFile.fromPath('image', imagePath));
-
-        _logDebug(
-          url: url,
-          method: "POST (Multipart)",
-          requestBody: request.fields,
-          statusCode: 0,
-          responseBody: "Mengirim data absensi & foto...",
-        );
-
-        var streamedResponse = await request.send();
-        response = await http.Response.fromStream(streamedResponse);
-      } else {
-        // Jika tidak ada gambar, gunakan standard POST JSON form
-        final Map<String, dynamic> body = {
-          'action': action,
-          if (catatan != null && catatan.isNotEmpty) 'catatan': catatan,
-          if (lokasi != null && lokasi.isNotEmpty) 'lokasi': lokasi,
-        };
-
-        response = await http.post(
-          Uri.parse(url),
-          headers: {
-            'Content-Type': 'application/json',
-            'Accept': 'application/json',
-            'Authorization': 'Bearer $token',
-            if (cookie != null) 'Cookie': cookie,
-          },
-          body: json.encode(body),
-        );
-      }
-
-      _logDebug(url: url, method: "POST", statusCode: response.statusCode, responseBody: response.body);
-
-      if (response.statusCode == 200 || response.statusCode == 201) {
-        return json.decode(response.body);
-      } else if (response.statusCode == 400 || response.statusCode == 403) {
-        // Berhasil menerima tanggapan (Misal: ditolak karena belum check out)
-        try {
-          return json.decode(response.body);
-        } catch (_) {
-          return {'success': false, 'message': 'Terjadi kesalahan pemrosesan absensi.'};
-        }
-      } else if (response.statusCode == 401) {
-        await logout();
-        return {'success': false, 'message': 'Sesi habis, silakan login lagi.'};
-      }
-
-      try {
-        final errorData = json.decode(response.body);
-        return {'success': false, 'message': errorData['message'] ?? 'Gagal mengirim absensi.'};
-      } catch (_) {
-        return {'success': false, 'message': 'Gagal mengirim absensi (Status: ${response.statusCode})'};
-      }
-    } catch (e) {
-      return {'success': false, 'message': 'Kesalahan jaringan: $e'};
-    }
-  }
-
-  // =========================================================================
-  // 🔥 MENGAMBIL RIWAYAT ABSENSI TERAPIS
-  // =========================================================================
-  Future<Map<String, dynamic>> getAttendanceHistory({String? bulan, String? tahun}) async {
-    final String? token = await _getToken();
-    final String? cookie = await _getCookie();
-    if (token == null) return {'success': false, 'message': 'Token tidak ditemukan'};
-
-    final Map<String, String> queryParams = {};
-    if (bulan != null && bulan.isNotEmpty) queryParams['bulan'] = bulan;
-    if (tahun != null && tahun.isNotEmpty) queryParams['tahun'] = tahun;
-
-    final uri = Uri.parse('$baseUrl/get_history_absensi.php')
-        .replace(queryParameters: queryParams.isNotEmpty ? queryParams : null);
-
-    try {
-      final response = await http.get(
-        uri,
-        headers: {
-          'Content-Type': 'application/json',
-          'Accept': 'application/json',
-          'Authorization': 'Bearer $token',
-          if (cookie != null) 'Cookie': cookie,
-        },
-      );
-
-      _logDebug(url: uri.toString(), method: "GET", statusCode: response.statusCode, responseBody: response.body);
-
-      if (response.statusCode == 200) {
-        return json.decode(response.body);
-      } else if (response.statusCode == 401) {
-        await logout();
-        return {'success': false, 'message': 'Sesi habis, silakan login lagi.'};
-      }
-
-      try {
-        final errorData = json.decode(response.body);
-        return {'success': false, 'message': errorData['message'] ?? 'Gagal mengambil riwayat absensi.'};
-      } catch (_) {
-        return {'success': false, 'message': 'Gagal mengambil riwayat absensi (Status: ${response.statusCode})'};
-      }
-    } catch (e) {
-      return {'success': false, 'message': 'Kesalahan jaringan: $e'};
-    }
-  }
-
-  // =========================================================================
-  // 🔥 1. MENGAMBIL RINGKASAN LAPORAN PENDAPATAN (ENDPOINT A - Default)
-  // =========================================================================
-  Future<Map<String, dynamic>> getTerapisReportSummary({
-    String? startDate,
-    String? endDate,
-    String? kodeGerai,
-  }) async {
-    final String? token = await _getToken();
-    final String? cookie = await _getCookie();
-    if (token == null) return {'success': false, 'message': 'Token tidak ditemukan'};
-
-    final Map<String, String> queryParams = {};
-    if (startDate != null && startDate.isNotEmpty) queryParams['start_date'] = startDate;
-    if (endDate != null && endDate.isNotEmpty) queryParams['end_date'] = endDate;
-    if (kodeGerai != null && kodeGerai.isNotEmpty) queryParams['kode_gerai'] = kodeGerai;
-
-    final uri = Uri.parse('$baseUrl/get_terapis_report.php')
-        .replace(queryParameters: queryParams.isNotEmpty ? queryParams : null);
-
-    try {
-      final response = await http.get(
-        uri,
-        headers: {
-          'Content-Type': 'application/json',
-          'Accept': 'application/json',
-          'Authorization': 'Bearer $token',
-          if (cookie != null) 'Cookie': cookie,
-        },
-      );
-
-      _logDebug(url: uri.toString(), method: "GET", statusCode: response.statusCode, responseBody: response.body);
-
-      if (response.statusCode == 200) {
-        final Map<String, dynamic> data = json.decode(response.body);
-        data['success'] = data.containsKey('status') ? data['status'] == 'success' : true;
-        return data;
-      } else if (response.statusCode == 401) {
-        await logout();
-        return {'success': false, 'message': 'Sesi habis, silakan login lagi.'};
-      } else if (response.statusCode == 405) {
-        return {'success': false, 'message': 'Metode HTTP tidak diizinkan.'};
-      }
-
-      try {
-        final errorData = json.decode(response.body);
-        return {'success': false, 'message': errorData['message'] ?? 'Gagal mengambil laporan terapis.'};
-      } catch (_) {
-        return {'success': false, 'message': 'Gagal mengambil laporan terapis (Status: ${response.statusCode})'};
-      }
-    } catch (e) {
-      return {'success': false, 'message': 'Kesalahan jaringan: $e'};
-    }
-  }
-
-  // =========================================================================
-  // 🔥 2. MENGAMBIL DAFTAR DETAIL KOMISI (ENDPOINT B - detail=komisi)
-  // =========================================================================
-  Future<Map<String, dynamic>> getTerapisCommissionDetail({
-    String? startDate,
-    String? endDate,
-    String? kodeGerai,
-  }) async {
-    final String? token = await _getToken();
-    final String? cookie = await _getCookie();
-    if (token == null) return {'success': false, 'message': 'Token tidak ditemukan'};
-
-    final Map<String, String> queryParams = {
-      'detail': 'komisi'
-    };
-    if (startDate != null && startDate.isNotEmpty) queryParams['start_date'] = startDate;
-    if (endDate != null && endDate.isNotEmpty) queryParams['end_date'] = endDate;
-    if (kodeGerai != null && kodeGerai.isNotEmpty) queryParams['kode_gerai'] = kodeGerai;
-
-    final uri = Uri.parse('$baseUrl/get_terapis_report.php')
-        .replace(queryParameters: queryParams);
-
-    try {
-      final response = await http.get(
-        uri,
-        headers: {
-          'Content-Type': 'application/json',
-          'Accept': 'application/json',
-          'Authorization': 'Bearer $token',
-          if (cookie != null) 'Cookie': cookie,
-        },
-      );
-
-      _logDebug(url: uri.toString(), method: "GET", statusCode: response.statusCode, responseBody: response.body);
-
-      if (response.statusCode == 200) {
-        final Map<String, dynamic> data = json.decode(response.body);
-        data['success'] = data.containsKey('status') ? data['status'] == 'success' : true;
-        return data;
-      } else if (response.statusCode == 401) {
-        await logout();
-        return {'success': false, 'message': 'Sesi habis, silakan login lagi.'};
-      }
-
-      try {
-        final errorData = json.decode(response.body);
-        return {'success': false, 'message': errorData['message'] ?? 'Gagal mengambil detail komisi.'};
-      } catch (_) {
-        return {'success': false, 'message': 'Gagal mengambil detail komisi (Status: ${response.statusCode})'};
-      }
-    } catch (e) {
-      return {'success': false, 'message': 'Kesalahan jaringan: $e'};
-    }
-  }
-
-  // =========================================================================
-  // 🔥 3. MENGAMBIL DAFTAR OVERRIDE DETAIL (ENDPOINT C - detail=override)
-  // =========================================================================
-  // CATATAN: Parameter telah diperbarui menjadi 'override' sesuai dokumentasi terbaru.
-  Future<Map<String, dynamic>> getTerapisOverrideDetail({
-    String? startDate,
-    String? endDate,
-    String? kodeGerai,
-  }) async {
-    final String? token = await _getToken();
-    final String? cookie = await _getCookie();
-    if (token == null) return {'success': false, 'message': 'Token tidak ditemukan'};
-
-    // 🔥 Parameter diubah menjadi 'override' sesuai preferensi dokumentasi
-    final Map<String, String> queryParams = {
-      'detail': 'override' 
-    };
-    if (startDate != null && startDate.isNotEmpty) queryParams['start_date'] = startDate;
-    if (endDate != null && endDate.isNotEmpty) queryParams['end_date'] = endDate;
-    if (kodeGerai != null && kodeGerai.isNotEmpty) queryParams['kode_gerai'] = kodeGerai;
-
-    final uri = Uri.parse('$baseUrl/get_terapis_report.php')
-        .replace(queryParameters: queryParams);
-
-    try {
-      final response = await http.get(
-        uri,
-        headers: {
-          'Content-Type': 'application/json',
-          'Accept': 'application/json',
-          'Authorization': 'Bearer $token',
-          if (cookie != null) 'Cookie': cookie,
-        },
-      );
-
-      _logDebug(url: uri.toString(), method: "GET", statusCode: response.statusCode, responseBody: response.body);
-
-      if (response.statusCode == 200) {
-        final Map<String, dynamic> data = json.decode(response.body);
-        data['success'] = data.containsKey('status') ? data['status'] == 'success' : true;
-        return data;
-      } else if (response.statusCode == 401) {
-        await logout();
-        return {'success': false, 'message': 'Sesi habis, silakan login lagi.'};
-      }
-
-      try {
-        final errorData = json.decode(response.body);
-        return {'success': false, 'message': errorData['message'] ?? 'Gagal mengambil detail override.'};
-      } catch (_) {
-        return {'success': false, 'message': 'Gagal mengambil detail override (Status: ${response.statusCode})'};
-      }
-    } catch (e) {
-      return {'success': false, 'message': 'Kesalahan jaringan: $e'};
-    }
+  Future<Map<String, dynamic>> getTerapisOverrideDetail({String? startDate, String? endDate, String? kodeGerai}) async {
+    final Map<String, String> params = {'detail': 'override'};
+    if (startDate != null && startDate.isNotEmpty) params['start_date'] = startDate;
+    if (endDate != null && endDate.isNotEmpty) params['end_date'] = endDate;
+    if (kodeGerai != null && kodeGerai.isNotEmpty) params['kode_gerai'] = kodeGerai;
+    return await _get('/get_terapis_report.php', queryParams: params);
   }
 }

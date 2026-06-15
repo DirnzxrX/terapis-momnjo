@@ -1,5 +1,7 @@
 import 'dart:io'; 
+import 'dart:convert'; // 🔥 DITAMBAHKAN UNTUK JSON ENCODER DEBUG
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart'; // Untuk mendeteksi kIsWeb
 import 'package:url_launcher/url_launcher.dart'; 
 import 'package:therapist_momnjo/data/api_service.dart';
 import 'package:intl/intl.dart';
@@ -34,6 +36,7 @@ class _BookingDetailScreenState extends State<BookingDetailScreen> {
     super.didChangeDependencies();
     if (!_isInitialized) {
       final args = ModalRoute.of(context)?.settings.arguments as Map<String, dynamic>?;
+      
       if (args != null) {
         _data = Map<String, dynamic>.from(args); 
         String passedStatus = args['booking_status'] ?? args['status'] ?? 'Open';
@@ -48,10 +51,24 @@ class _BookingDetailScreenState extends State<BookingDetailScreen> {
         if (idTrans != null && idTrans.isNotEmpty) {
           _loadJobDetail(idTrans);
         }
+        _isInitialized = true;
       } else {
-        _currentStatus = 'Accepted';
+        // --- PERBAIKAN LOGIKA DEFENSIVE ---
+        // Jika args null (terjadi saat refresh di Flutter Web), kita paksa kembali ke halaman sebelumnya
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Sesi memori hilang akibat refresh. Mengembalikan ke halaman utama...'), 
+              backgroundColor: Colors.redAccent
+            )
+          );
+          if (Navigator.canPop(context)) {
+            Navigator.pop(context);
+          } else {
+            Navigator.pushReplacementNamed(context, '/'); // Paksa ke root
+          }
+        });
       }
-      _isInitialized = true;
     }
   }
 
@@ -149,13 +166,76 @@ class _BookingDetailScreenState extends State<BookingDetailScreen> {
           _data?['booking_status'] = newStatus; 
         });
       } else {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(response['message'] ?? 'Gagal update status server')),
-        );
-        setState(() {
-          _currentStatus = newStatus;
-          _data?['booking_status'] = newStatus; 
-        });
+        // 🔥 MODIFIKASI: Menangkap pesan debug dari Backend + Mencegah Status Berubah
+        String errorMessage = response['message'] ?? 'Gagal update status server';
+        
+        if (response['debug'] != null) {
+          // Konversi object debug PHP menjadi string format JSON yang rapi
+          String debugInfo = '';
+          try {
+            debugInfo = const JsonEncoder.withIndent('  ').convert(response['debug']);
+          } catch (e) {
+            debugInfo = response['debug'].toString();
+          }
+          
+          debugPrint("=== DEBUG DARI BACKEND ===");
+          debugPrint(debugInfo);
+          debugPrint("==========================");
+
+          showDialog(
+            context: context,
+            builder: (ctx) {
+              return AlertDialog(
+                title: const Text('Gagal Upload (Info PHP)'),
+                content: SingleChildScrollView(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min, // 🔥 PERBAIKAN: Diubah dari crossAxisSize menjadi mainAxisSize
+                    children: [
+                      Text(
+                        errorMessage, 
+                        style: const TextStyle(color: Colors.red, fontWeight: FontWeight.bold)
+                      ),
+                      const SizedBox(height: 10),
+                      const Text(
+                        'Data Debug (Screenshot dan kirim ke backend):', 
+                        style: TextStyle(fontSize: 12, color: Colors.black54)
+                      ),
+                      const SizedBox(height: 4),
+                      Container(
+                        padding: const EdgeInsets.all(8),
+                        decoration: BoxDecoration(
+                          color: Colors.grey.shade200,
+                          border: Border.all(color: Colors.grey.shade300),
+                          borderRadius: BorderRadius.circular(8)
+                        ),
+                        child: Text(
+                          debugInfo, 
+                          style: const TextStyle(fontSize: 10, fontFamily: 'monospace')
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                actions: [
+                  TextButton(
+                    onPressed: () => Navigator.pop(ctx), 
+                    child: const Text('Tutup')
+                  )
+                ],
+              );
+            }
+          );
+        } else {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(errorMessage), 
+              backgroundColor: Colors.redAccent,
+              duration: const Duration(seconds: 4),
+            ),
+          );
+        }
+        // PERHATIAN: Di blok ini JANGAN ada `setState(_currentStatus = newStatus)`. 
+        // Supaya garis timeline tidak berubah menjadi hijau kalau aslinya gagal.
       }
     }
   }
@@ -188,6 +268,7 @@ class _BookingDetailScreenState extends State<BookingDetailScreen> {
       final XFile? photo = await picker.pickImage(
         source: ImageSource.camera,
         preferredCameraDevice: CameraDevice.front, 
+        imageQuality: 50, // 🔥 TAMBAHAN: Kompres gambar jadi 50% supaya tidak kena limit di server
       );
 
       if (photo != null) {
@@ -236,12 +317,20 @@ class _BookingDetailScreenState extends State<BookingDetailScreen> {
                     child: Stack(
                       alignment: Alignment.bottomLeft,
                       children: [
-                        Image.file(
-                          File(_arrivalPhotoPath!), 
-                          height: 300, 
-                          width: double.maxFinite, 
-                          fit: BoxFit.cover
-                        ),
+                        // MEMISAHKAN LOGIKA WEB DAN MOBILE (Supaya tidak error dart:io)
+                        kIsWeb
+                          ? Image.network(
+                              _arrivalPhotoPath!,
+                              height: 300,
+                              width: double.maxFinite,
+                              fit: BoxFit.cover,
+                            )
+                          : Image.file(
+                              File(_arrivalPhotoPath!), 
+                              height: 300, 
+                              width: double.maxFinite, 
+                              fit: BoxFit.cover
+                            ),
                         Container(
                           width: double.maxFinite, 
                           color: Colors.black.withOpacity(0.6), 
@@ -317,6 +406,13 @@ class _BookingDetailScreenState extends State<BookingDetailScreen> {
 
   @override
   Widget build(BuildContext context) {
+    if (_data == null) {
+      return const Scaffold(
+        backgroundColor: Color(0xFFFAFAFA),
+        body: Center(child: CircularProgressIndicator()),
+      );
+    }
+
     final String idBooking = _data?['id_booking']?.toString() ?? '-';
     final String idTransaksi = _data?['id_transaksi']?.toString() ?? '-';
     final String startTime = _formatDateTime(_data?['start_time']?.toString());
@@ -518,7 +614,6 @@ class _BookingDetailScreenState extends State<BookingDetailScreen> {
     );
   }
 
-  // --- BAGIAN YANG DIPERBARUI: MENAMPILKAN DURASI LAYANAN ---
   Widget _buildServiceCard(List<dynamic> layananList) {
     return Container(
       padding: const EdgeInsets.all(16),
@@ -531,11 +626,9 @@ class _BookingDetailScreenState extends State<BookingDetailScreen> {
           ...layananList.map((item) {
             String name = item is Map ? (item['name'] ?? item['product_name'] ?? 'Layanan') : item.toString();
             
-            // Ekstrak durasi dari map (Sesuaikan key 'duration' atau 'durasi' dengan response API Anda)
             String duration = '';
             if (item is Map) {
               String rawDuration = (item['duration'] ?? item['durasi'] ?? item['waktu'] ?? '').toString();
-              // Hapus kata 'min', 'mins', atau 'menit' bawaan dari API menggunakan property caseSensitive
               duration = rawDuration.replaceAll(RegExp(r'minutes|minute|mins|min|menit', caseSensitive: false), '').trim();
             }
 
@@ -551,7 +644,6 @@ class _BookingDetailScreenState extends State<BookingDetailScreen> {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(name, style: const TextStyle(fontSize: 14)),
-                        // Tampilkan durasi jika ada
                         if (duration.isNotEmpty && duration != 'null')
                           Padding(
                             padding: const EdgeInsets.only(top: 2),

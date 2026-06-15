@@ -17,7 +17,6 @@ class _ActivityDetailScreenState extends State<ActivityDetailScreen> {
 
   String _idTransaksi = '';
   Map<String, dynamic>? _detailData;
-  Map<String, dynamic>? _argsData; // Menyimpan data murni dari Job Aktif
   bool _isLoadingDetail = true;
   bool _isSubmittingRating = false;
   String? _errorMessage;
@@ -31,7 +30,6 @@ class _ActivityDetailScreenState extends State<ActivityDetailScreen> {
     if (_idTransaksi.isEmpty) {
       final args = ModalRoute.of(context)?.settings.arguments as Map<String, dynamic>?;
       if (args != null) {
-        _argsData = args; // Simpan data dari layar sebelumnya untuk ekstrak durasi asli
         _idTransaksi = args['id_transaksi']?.toString() ?? args['id_booking']?.toString() ?? '';
         if (_idTransaksi.isNotEmpty) {
           _fetchDetail();
@@ -197,7 +195,8 @@ class _ActivityDetailScreenState extends State<ActivityDetailScreen> {
             _buildSection2TreatmentInfo(infoTreatment),
             const SizedBox(height: 16),
             
-            _buildSection3TimeInfo(infoWaktu, infoTreatment),
+            // --- PASSING infoWaktu SAJA (Pure dari backend) ---
+            _buildSection3TimeInfo(infoWaktu),
             const SizedBox(height: 16),
             
             rateTerapis['is_submitted'] == true 
@@ -352,35 +351,6 @@ class _ActivityDetailScreenState extends State<ActivityDetailScreen> {
     );
   }
 
-  // Parser Durasi Cerdas
-  int _parseDuration(dynamic durValue, String fallbackName) {
-    if (durValue != null) {
-      String durStr = durValue.toString().toLowerCase().trim();
-      int? parsed = int.tryParse(durStr);
-      if (parsed != null && parsed > 0) return parsed;
-      
-      final RegExp regExp = RegExp(r'(\d+)');
-      final match = regExp.firstMatch(durStr);
-      if (match != null) {
-         int extracted = int.tryParse(match.group(1) ?? '60') ?? 60;
-         if (extracted > 0) {
-            if (durStr.contains('jam') || durStr.contains('hour')) {
-               return extracted * 60;
-            }
-            return extracted;
-         }
-      }
-    }
-    
-    final RegExp regExpName = RegExp(r'(\d+)\s*(min|menit|mins)', caseSensitive: false);
-    final matchName = regExpName.firstMatch(fallbackName);
-    if (matchName != null) {
-       return int.tryParse(matchName.group(1) ?? '60') ?? 60;
-    }
-
-    return 60; 
-  }
-
   // Parser Tanggal
   DateTime? _robustParseDate(String val) {
     if (val.isEmpty || val == '-' || val.toLowerCase() == 'null') return null;
@@ -402,110 +372,23 @@ class _ActivityDetailScreenState extends State<ActivityDetailScreen> {
     }
   }
 
-  // 🔥 3. INFORMASI WAKTU DENGAN KALKULASI CERDAS (Menimpa Jadwal Bodong)
-  Widget _buildSection3TimeInfo(Map<String, dynamic> dataWaktu, Map<String, dynamic> dataTreatment) {
-    final maps = [dataWaktu, dataTreatment, _detailData ?? {}, _argsData ?? {}];
-    
-    String _find(List<String> keys) {
-      for (var map in maps) {
-        for (var k in keys) {
-          if (map.containsKey(k) && map[k] != null && map[k].toString().trim().isNotEmpty && map[k].toString().trim() != '-' && map[k].toString().toLowerCase() != 'null') {
-            return map[k].toString().trim();
-          }
-        }
-      }
-      return '';
-    }
-
-    String actualStart = _find(['actual_start_time', 'waktu_mulai_aktual', 'waktu_realisasi_mulai', 'started_at', 'job_start_time', 'start_treatment']);
-    String schedStart = _find(['start_time', 'waktu_mulai', 'created_at']);
-    String rawStart = actualStart.isNotEmpty ? actualStart : schedStart;
-
-    String actualEnd = _find(['actual_end_time', 'waktu_selesai_aktual', 'waktu_realisasi_selesai', 'ended_at', 'finished_at', 'job_end_time', 'end_treatment']);
-    String schedEnd = _find(['end_time', 'waktu_selesai', 'updated_at']);
-    String rawEnd = actualEnd.isNotEmpty ? actualEnd : schedEnd;
-
-    String actualDur = _find(['durasi_aktual', 'actual_duration', 'elapsed_time', 'durasi_realisasi', 'waktu_pengerjaan']);
-    String schedDur = _find(['total_duration', 'durasi', 'duration']);
-
-    // 🔥 1. Ekstrak durasi asli langsung dari argumen Job Aktif (paling akurat)
-    int expectedMins = 0;
-    if (_argsData != null && _argsData!['treatments'] != null && _argsData!['treatments'] is List) {
-      for (var item in _argsData!['treatments']) {
-        if (item is Map) {
-          String d = (item['duration'] ?? item['durasi'] ?? item['waktu'] ?? '').toString();
-          int? parsed = int.tryParse(d.replaceAll(RegExp(r'[^0-9]'), '')); // Membuang string 'min' agar jadi angka
-          if (parsed != null && parsed > 0) {
-            expectedMins += parsed; 
-          }
-        }
-      }
-    }
-
-    // 🔥 2. Jika dari args tidak ketemu, gunakan fungsi fallback dari API report
-    if (expectedMins == 0) {
-      expectedMins = _parseDuration(schedDur, dataTreatment['treatment_name']?.toString() ?? '');
-    }
+  // 🔥 3. INFORMASI WAKTU (Murni 100% dari Backend)
+  Widget _buildSection3TimeInfo(Map<String, dynamic> dataWaktu) {
+    String rawStart = dataWaktu['start_time']?.toString().trim() ?? '-';
+    String rawEnd = dataWaktu['end_time']?.toString().trim() ?? '-';
+    String rawDuration = dataWaktu['total_duration']?.toString().trim() ?? '-';
 
     DateTime? startDt = _robustParseDate(rawStart);
     DateTime? endDt = _robustParseDate(rawEnd);
 
-    String displayMulai = 'Belum tercatat';
-    String displaySelesai = 'Belum tercatat';
-    String displayDurasi = 'Belum tercatat';
+    String displayMulai = startDt != null ? DateFormat('dd MMM yyyy, HH:mm').format(startDt) : rawStart;
+    String displaySelesai = endDt != null ? DateFormat('dd MMM yyyy, HH:mm').format(endDt) : rawEnd;
+    String displayDurasi = rawDuration;
 
-    if (startDt != null) {
-      displayMulai = DateFormat('dd MMM yyyy, HH:mm').format(startDt);
-    } else if (rawStart.isNotEmpty) {
-      displayMulai = rawStart;
-    }
-
-    if (endDt != null) {
-      displaySelesai = DateFormat('dd MMM yyyy, HH:mm').format(endDt);
-    } else if (rawEnd.isNotEmpty) {
-      displaySelesai = rawEnd;
-    }
-
-    // --- LOGIKA PERHITUNGAN DURASI FINAL DAN OVERRIDE WAKTU SELESAI ---
-    if (actualDur.isNotEmpty) {
-      int? sec = int.tryParse(actualDur.replaceAll(RegExp(r'[^0-9]'), ''));
-      if (sec != null && sec > 300) { 
-         displayDurasi = '${sec ~/ 60} menit';
-      } else if (sec != null && sec > 0) {
-         // Jika tercatat exactly 60 menit dari API padahal aslinya (misal) 80, kita Timpa!
-         if ((sec == 60 || sec == 0) && expectedMins > 0 && expectedMins != 60) {
-            displayDurasi = '$expectedMins menit';
-            if (startDt != null) {
-                endDt = startDt.add(Duration(minutes: expectedMins));
-                displaySelesai = DateFormat('dd MMM yyyy, HH:mm').format(endDt);
-            }
-         } else {
-            displayDurasi = '$sec menit';
-         }
-      } else {
-         displayDurasi = actualDur.contains('menit') || actualDur.contains('min') ? actualDur : '$actualDur menit';
-      }
-    } 
-    else if (startDt != null && endDt != null) {
-      int diffMins = endDt.difference(startDt).inMinutes;
-      
-      // 🔥 OVERRIDE: Jika selisih API hanya 60 menit default, padahal aslinya (misal) 80 menit, Timpa!
-      if ((diffMins == 60 || diffMins == 0 || diffMins < 0) && expectedMins > 0) {
-         displayDurasi = '$expectedMins menit';
-         endDt = startDt.add(Duration(minutes: expectedMins));
-         displaySelesai = DateFormat('dd MMM yyyy, HH:mm').format(endDt);
-      } else {
-         displayDurasi = '$diffMins menit';
-      }
-    } 
-    else {
-      // Jika salah satu waktu belum dicatat, tampilkan durasi default
-      displayDurasi = expectedMins > 0 ? '$expectedMins menit' : '60 menit';
-      if (startDt != null && rawEnd.isEmpty) {
-         endDt = startDt.add(Duration(minutes: expectedMins > 0 ? expectedMins : 60));
-         displaySelesai = DateFormat('dd MMM yyyy, HH:mm').format(endDt);
-      }
-    }
+    // Bersihkan nilai null jika terdeteksi
+    if (displayMulai.toLowerCase() == 'null' || displayMulai.isEmpty) displayMulai = '-';
+    if (displaySelesai.toLowerCase() == 'null' || displaySelesai.isEmpty) displaySelesai = '-';
+    if (displayDurasi.toLowerCase() == 'null' || displayDurasi.isEmpty) displayDurasi = '-';
 
     return _buildBaseCard(
       titleNumber: '3',
@@ -525,7 +408,7 @@ class _ActivityDetailScreenState extends State<ActivityDetailScreen> {
                   style: TextStyle(
                     fontSize: 13, 
                     fontWeight: FontWeight.bold, 
-                    color: displayMulai == 'Belum tercatat' ? Colors.redAccent : textDarkBrown
+                    color: displayMulai == '-' ? Colors.redAccent : textDarkBrown
                   ),
                   textAlign: TextAlign.right,
                 ),
@@ -545,7 +428,7 @@ class _ActivityDetailScreenState extends State<ActivityDetailScreen> {
                   style: TextStyle(
                     fontSize: 13, 
                     fontWeight: FontWeight.bold, 
-                    color: displaySelesai == 'Belum tercatat' ? Colors.redAccent : textDarkBrown
+                    color: displaySelesai == '-' ? Colors.redAccent : textDarkBrown
                   ),
                   textAlign: TextAlign.right,
                 ),
@@ -565,7 +448,7 @@ class _ActivityDetailScreenState extends State<ActivityDetailScreen> {
                   style: TextStyle(
                     fontSize: 13, 
                     fontWeight: FontWeight.bold, 
-                    color: displayDurasi.contains('Belum') ? Colors.redAccent : primaryPeach
+                    color: displayDurasi == '-' ? Colors.redAccent : primaryPeach
                   ),
                   textAlign: TextAlign.right,
                 ),

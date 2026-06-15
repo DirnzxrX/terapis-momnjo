@@ -35,10 +35,14 @@ class _HomeScreenState extends State<HomeScreen> {
   late PageController _pageController;
   Timer? _carouselTimer;
 
+  // Konstanta Warna
+  final Color textDarkBrown = const Color(0xFF4A332B);
+  final Color primaryPeach = const Color(0xFFECA898);
+  final Color goldBrown = const Color(0xFFB08D57);
+
   @override
   void initState() {
     super.initState();
-    // viewportFraction 0.95 membuat sedikit bagian gambar selanjutnya terlihat
     _pageController = PageController(initialPage: _currentCarouselIndex, viewportFraction: 0.95);
     _loadData();
   }
@@ -56,7 +60,6 @@ class _HomeScreenState extends State<HomeScreen> {
     if (_carouselImages.length > 1) {
       _carouselTimer = Timer.periodic(const Duration(seconds: 4), (timer) {
         if (_pageController.hasClients) {
-          // Infinite loop: cukup selalu pindah ke halaman berikutnya
           _pageController.nextPage(
             duration: const Duration(milliseconds: 500),
             curve: Curves.fastOutSlowIn,
@@ -164,10 +167,11 @@ class _HomeScreenState extends State<HomeScreen> {
           }
           namaTampil = fetchedName;
           
+          // 🔥 PERBAIKAN: Menggunakan baseImageUrl dari ApiService
           if (data['avatar_url'] != null) {
             fotoSimpanan = data['avatar_url'];
           } else if (data['avatar'] != null && data['avatar'].toString().isNotEmpty) {
-            fotoSimpanan = "https://app.momnjo.com/assets/images/${data['avatar']}";
+            fotoSimpanan = "${ApiService.baseImageUrl}/${data['avatar']}";
           }
         }
       } catch (e) {}
@@ -190,7 +194,7 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
-  // --- FUNGSI AMBIL CAROUSEL DARI API (SUPER AGRESIF) ---
+  // --- FUNGSI AMBIL CAROUSEL DARI API ---
   Future<void> _fetchCarousel(ApiService api) async {
     try {
       final response = await api.getCarousel();
@@ -213,7 +217,6 @@ class _HomeScreenState extends State<HomeScreen> {
           } else if (item is Map) {
             String? url = item['image'] ?? item['image_url'] ?? item['banner'] ?? item['file'] ?? item['url'] ?? item['foto'] ?? item['gambar'] ?? item['path'];
             
-            // 🔥 SAPU BERSIH: Cari value apapun yang bentuknya seperti file gambar jika key standar gagal
             if (url == null || url.trim().isEmpty) {
               for (var val in item.values) {
                 if (val is String) {
@@ -227,8 +230,11 @@ class _HomeScreenState extends State<HomeScreen> {
             }
 
             if (url != null && url.trim().isNotEmpty) {
+              // 🔥 PERBAIKAN: Menggunakan baseImageUrl jika bukan link eksternal
               if (!url.startsWith('http')) {
-                url = 'https://app.momnjo.com/$url'.replaceAll('//assets', '/assets'); 
+                // Hapus awalan '/' atau 'assets/images/' jika terbawa dari backend
+                url = url.replaceAll('assets/images/', '').replaceFirst(RegExp(r'^/'), '');
+                url = '${ApiService.baseImageUrl}/$url'; 
               }
               loadedImages.add(url);
             }
@@ -247,13 +253,7 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
-  Future<void> _toggleDutyStatus(bool value) async {
-    setState(() {
-      _isOnDuty = value;
-    });
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setBool('is_on_duty', value);
-  }
+  // 🔥 FUNGSI _toggleDutyStatus DIHAPUS KARENA SANGAT BERBAHAYA (MEM-BYPASS API)!
 
   String _formatTime(String? rawTime) {
     if (rawTime == null || rawTime.isEmpty) return '--:--';
@@ -360,10 +360,6 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  final Color textDarkBrown = const Color(0xFF4A332B);
-  final Color primaryPeach = const Color(0xFFECA898);
-  final Color goldBrown = const Color(0xFFB08D57);
-
   @override
   Widget build(BuildContext context) {
     return Container(
@@ -443,7 +439,6 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  // 🔥 WIDGET: CAROUSEL BANNER INFINITE LOOP
   Widget _buildCarouselSection() {
     if (_carouselImages.isEmpty) {
       return ClipRRect(
@@ -458,7 +453,6 @@ class _HomeScreenState extends State<HomeScreen> {
       );
     }
 
-    // Mendapatkan indeks aktif sebenarnya (0, 1, 2, dst) untuk animasi dots
     int activeDotIndex = _currentCarouselIndex % _carouselImages.length;
 
     return Column(
@@ -469,7 +463,6 @@ class _HomeScreenState extends State<HomeScreen> {
           child: PageView.builder(
             controller: _pageController,
             physics: const BouncingScrollPhysics(parent: PageScrollPhysics()),
-            // 🔥 ITEM COUNT DIHILANGKAN agar bisa Infinite Loop
             onPageChanged: (index) {
               setState(() {
                 _currentCarouselIndex = index;
@@ -479,7 +472,6 @@ class _HomeScreenState extends State<HomeScreen> {
               }
             },
             itemBuilder: (context, index) {
-              // 🔥 RUMUS SISA BAGI: memastikan index tidak pernah melebihi jumlah gambar
               int actualImageIndex = index % _carouselImages.length;
               
               return Padding(
@@ -503,7 +495,6 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
         ),
         const SizedBox(height: 12),
-        // DOTS INDICATOR
         if (_carouselImages.length > 1)
           Row(
             mainAxisAlignment: MainAxisAlignment.center,
@@ -617,8 +608,13 @@ class _HomeScreenState extends State<HomeScreen> {
                 Row(
                   crossAxisAlignment: CrossAxisAlignment.center,
                   children: [
+                    // 🔥 PERBAIKAN: Jika dipencet, bawa mereka ke halaman Manajemen Absensi
                     GestureDetector(
-                      onTap: () => _toggleDutyStatus(!_isOnDuty),
+                      onTap: () {
+                        Navigator.pushNamed(context, '/leave_management').then((_) {
+                          _loadData(); // Segarkan data jika status berubah di layar absensi
+                        });
+                      },
                       child: Container(
                         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
                         decoration: BoxDecoration(

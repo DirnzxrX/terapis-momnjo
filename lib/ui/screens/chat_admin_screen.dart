@@ -1,16 +1,78 @@
 import 'package:flutter/material.dart';
-import 'package:url_launcher/url_launcher.dart'; // Pastikan sudah menambahkan url_launcher di pubspec.yaml
+import 'package:url_launcher/url_launcher.dart'; 
+import 'package:shared_preferences/shared_preferences.dart'; 
+// Sesuaikan path import ini dengan lokasi file api_service.dart di project Anda
+import 'package:therapist_momnjo/data/api_service.dart'; 
 
-class ChatAdminScreen extends StatelessWidget {
+class ChatAdminScreen extends StatefulWidget {
   const ChatAdminScreen({Key? key}) : super(key: key);
 
-  final Color primaryPink = const Color(0xFFE8647C);
-  final String adminPhoneNumber = "+6281387297524"; // Ganti dengan nomor admin Mom n Jo
+  @override
+  State<ChatAdminScreen> createState() => _ChatAdminScreenState();
+}
 
-  // --- FUNGSI UNTUK MEMBUKA WHATSAPP ---
+class _ChatAdminScreenState extends State<ChatAdminScreen> {
+  final Color primaryPink = const Color(0xFFE8647C);
+  
+  // Nomor cadangan (fallback) jika API gagal merespons
+  final String _fallbackPhoneNumber = "+6281387297524"; 
+  
+  String? _dynamicAdminPhoneNumber;
+  String _namaTerapis = "Terapis";
+  bool _isLoading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _initializeData();
+  }
+
+  // --- INISIALISASI DATA AWAL ---
+  Future<void> _initializeData() async {
+    final prefs = await SharedPreferences.getInstance();
+    
+    setState(() {
+      _namaTerapis = prefs.getString('nama_lengkap') ?? "Terapis"; 
+    });
+
+    // Jalankan pengambilan kontak WA gerai secara dinamis
+    await _fetchAdminPhoneNumber();
+  }
+
+  // --- AMBIL KONTAK WA GERAI LEWAT API SERVICE ---
+  Future<void> _fetchAdminPhoneNumber() async {
+    try {
+      // 🔥 UI sekarang bersih! Tinggal panggil getGeraiWa() dari ApiService
+      final response = await ApiService().getGeraiWa();
+
+      if (response['success'] == true && response['data'] != null) {
+        setState(() {
+          _dynamicAdminPhoneNumber = response['data']['kontak_wa'];
+        });
+      } else {
+        debugPrint('Gagal mendapatkan kontak WA dari server: ${response['message']}');
+      }
+    } catch (e) {
+      debugPrint('Terjadi kesalahan saat memanggil API: $e');
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+        });
+      }
+    }
+  }
+
+  // --- LOGIKA MEMBUKA APLIKASI WHATSAPP ---
   Future<void> _openWhatsApp(BuildContext context) async {
-    final String message = "Halo Admin Mom n Jo, saya Rina (Terapis), ingin bertanya mengenai layanan dan jadwal kerja. Terima kasih!";
-    final String url = "https://wa.me/${adminPhoneNumber.replaceAll('+', '').replaceAll(' ', '')}?text=${Uri.encodeComponent(message)}";
+    // Pilih nomor dinamis jika ada, jika tidak, gunakan cadangan
+    final String targetNumber = _dynamicAdminPhoneNumber ?? _fallbackPhoneNumber;
+    
+    final String message = "Halo Admin Mom n Jo, saya $_namaTerapis, ingin bertanya mengenai layanan dan jadwal kerja. Terima kasih!";
+    
+    // Hilangkan karakter '+' dan spasi agar URL wa.me valid
+    final String cleanNumber = targetNumber.replaceAll('+', '').replaceAll(' ', '');
+    final String url = "https://wa.me/$cleanNumber?text=${Uri.encodeComponent(message)}";
     
     final Uri uri = Uri.parse(url);
     
@@ -18,14 +80,13 @@ class ChatAdminScreen extends StatelessWidget {
       if (await canLaunchUrl(uri)) {
         await launchUrl(uri, mode: LaunchMode.externalApplication);
       } else {
-        throw 'Tidak dapat membuka WhatsApp';
+        throw 'Tidak dapat membuka aplikasi WhatsApp';
       }
     } catch (e) {
-      // Jika gagal membuka aplikasi WA (misal: tidak terinstall), munculkan pesan
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: const Text('Gagal membuka WhatsApp. Pastikan aplikasi WhatsApp terinstall.'),
+            content: const Text('Gagal membuka WhatsApp. Pastikan aplikasi WhatsApp sudah terinstall.'),
             backgroundColor: Colors.red.shade700,
             behavior: SnackBarBehavior.floating,
           ),
@@ -77,7 +138,6 @@ class ChatAdminScreen extends StatelessWidget {
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  // Icon WhatsApp atau Logo
                   Container(
                     padding: const EdgeInsets.all(16),
                     decoration: BoxDecoration(
@@ -107,18 +167,25 @@ class ChatAdminScreen extends StatelessWidget {
                     ),
                   ),
                   const SizedBox(height: 30),
-                  // Tombol Utama
+                  // Tombol dengan Indikator Memuat Data
                   SizedBox(
                     width: double.infinity,
                     child: ElevatedButton.icon(
-                      onPressed: () => _openWhatsApp(context),
-                      icon: const Icon(Icons.phone_android, color: Colors.white),
-                      label: const Text(
-                        'Buka WhatsApp',
-                        style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16),
+                      onPressed: _isLoading ? null : () => _openWhatsApp(context),
+                      icon: _isLoading 
+                          ? const SizedBox(
+                              width: 20, 
+                              height: 20, 
+                              child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2)
+                            )
+                          : const Icon(Icons.phone_android, color: Colors.white),
+                      label: Text(
+                        _isLoading ? 'Memuat Nomor...' : 'Buka WhatsApp',
+                        style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16),
                       ),
                       style: ElevatedButton.styleFrom(
                         backgroundColor: Colors.green.shade600,
+                        disabledBackgroundColor: Colors.green.shade300,
                         padding: const EdgeInsets.symmetric(vertical: 16),
                         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                         elevation: 0,

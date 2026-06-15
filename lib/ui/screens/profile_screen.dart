@@ -14,11 +14,14 @@ class ProfileScreen extends StatefulWidget {
 
 class _ProfileScreenState extends State<ProfileScreen> {
   final Color primaryPink = const Color(0xFFE8647C); 
+  
+  // 🔥 PRAKTIK TERBAIK: Pindahkan URL ini ke file konfigurasi global nantinya!
+  final String baseImageUrl = "https://dashboard.momnjo.my.id/assets/images";
 
   // --- STATE VARIABLE UNTUK DATA DINAMIS ---
   String _therapistName = "Memuat...";
   String _therapistId = "-";
-  String _gerai = "Memuat..."; // State baru untuk Gerai
+  String _gerai = "Memuat..."; 
   
   // State untuk Rating dan Review
   String _rating = "0.0";
@@ -52,11 +55,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
         setState(() {
           _therapistName = name.isEmpty ? id : name; 
           _therapistId = id;
-          _gerai = branch; // Tampilkan gerai dari lokal sementara loading
+          _gerai = branch; 
         });
       }
 
-      // 2. Panggil API secara paralel (Profile untuk rating, Data Diri untuk Gerai yang pasti)
+      // 2. Panggil API secara paralel
       final apiService = ApiService();
       final responses = await Future.wait([
         apiService.getProfile(),
@@ -95,10 +98,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
             _reviewCount = data['total_reviews']?.toString() ?? '0';
             
+            // 🔥 PERBAIKAN DI SINI: Menggunakan variabel baseImageUrl
             if (data['avatar_url'] != null) {
               _avatarUrl = data['avatar_url'];
             } else if (data['avatar'] != null && data['avatar'].toString().isNotEmpty) {
-              _avatarUrl = "https://app.momnjo.com/assets/images/${data['avatar']}";
+              _avatarUrl = "$baseImageUrl/${data['avatar']}";
             }
 
             // Cek jika API profile punya gerai (fallback awal)
@@ -260,6 +264,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
             ),
             child: CircleAvatar(
               radius: 36,
+              // Menambahkan penanganan error untuk gambar yang gagal dimuat
+              onBackgroundImageError: (exception, stackTrace) {
+                 debugPrint("Gagal memuat gambar avatar: $exception");
+              },
               backgroundImage: _avatarUrl.isNotEmpty 
                   ? NetworkImage(_avatarUrl)
                   : const NetworkImage('https://ui-avatars.com/api/?name=Mom+N+Jo&background=E8647C&color=fff'), 
@@ -336,7 +344,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
       ),
       child: Column(
         children: [
-          // 🔥 Memanggil variabel _gerai yang dinamis
           _buildInfoRow('Gerai', _gerai), 
         ],
       ),
