@@ -135,82 +135,92 @@ class _PemeriksaanScreenState extends State<PemeriksaanScreen> {
     final args = widget.bookingData ?? ModalRoute.of(context)?.settings.arguments as Map<String, dynamic>?;
     final String namaKlien = (args?['customer_name'] ?? args?['customer_fullname'] ?? 'Klien').toString();
 
-    return GestureDetector(
-      onTap: () => FocusScope.of(context).unfocus(),
-      child: Scaffold(
-        backgroundColor: bgOuter,
-        body: SafeArea(
-          bottom: false,
-          child: Column(
-            children: [
-              const SizedBox(height: 16),
-              Expanded(
-                child: Container(
-                  width: double.infinity,
-                  decoration: BoxDecoration(
-                    color: bgInner, 
-                    borderRadius: const BorderRadius.vertical(top: Radius.circular(30))
-                  ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Padding(
-                        padding: const EdgeInsets.fromLTRB(24, 24, 24, 16),
-                        child: Row(
-                          children: [
-                            GestureDetector(
-                              // Mengembalikan false saat di-back agar tidak otomatis terbaca "berhasil"
-                              onTap: () => Navigator.pop(context, false), 
-                              child: Icon(Icons.arrow_back_ios_new, color: textDark, size: 20)
-                            ),
-                            const SizedBox(width: 16),
-                            Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text('Pemeriksaan', style: TextStyle(fontSize: 24, fontWeight: FontWeight.w800, color: textDark)),
-                                  Text('Klien: $namaKlien', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: textDark.withOpacity(0.6))),
-                                ],
+    // DIBUNGKUS POPSCOPE UNTUK MEMBLOKIR TOMBOL BACK FISIK/SWIPE
+    return PopScope(
+      canPop: false, 
+      onPopInvoked: (didPop) {
+        if (didPop) return;
+        // Opsional: Anda bisa memunculkan peringatan di sini jika user memaksa back
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Anda wajib mengisi form pemeriksaan ini terlebih dahulu.'),
+            backgroundColor: Colors.redAccent,
+            duration: Duration(seconds: 2),
+          )
+        );
+      },
+      child: GestureDetector(
+        onTap: () => FocusScope.of(context).unfocus(),
+        child: Scaffold(
+          backgroundColor: bgOuter,
+          body: SafeArea(
+            bottom: false,
+            child: Column(
+              children: [
+                const SizedBox(height: 16),
+                Expanded(
+                  child: Container(
+                    width: double.infinity,
+                    decoration: BoxDecoration(
+                      color: bgInner, 
+                      borderRadius: const BorderRadius.vertical(top: Radius.circular(30))
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Padding(
+                          padding: const EdgeInsets.fromLTRB(24, 24, 24, 16),
+                          child: Row(
+                            children: [
+                              // TOMBOL BACK UI SUDAH DIHAPUS DI SINI
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text('Pemeriksaan', style: TextStyle(fontSize: 24, fontWeight: FontWeight.w800, color: textDark)),
+                                    Text('Klien: $namaKlien', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: textDark.withOpacity(0.6))),
+                                  ],
+                                ),
                               ),
-                            ),
-                          ]
+                            ]
+                          ),
                         ),
-                      ),
-                      Divider(color: Colors.black.withOpacity(0.05), height: 1, thickness: 2),
-                      Expanded(
-                        child: ListView(
-                          padding: const EdgeInsets.all(20),
-                          children: [
-                            _buildCardPemeriksaan(),
-                            const SizedBox(height: 20),
-                            _buildCardCatatan(),
-                            const SizedBox(height: 40),
-                          ],
+                        Divider(color: Colors.black.withOpacity(0.05), height: 1, thickness: 2),
+                        Expanded(
+                          child: ListView(
+                            padding: const EdgeInsets.all(20),
+                            children: [
+                              _buildCardPemeriksaan(),
+                              const SizedBox(height: 20),
+                              _buildCardCatatan(),
+                              const SizedBox(height: 40),
+                            ],
+                          ),
                         ),
-                      ),
-                    ],
+                      ],
+                    ),
                   ),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
-        ),
-        bottomNavigationBar: Container(
-          color: bgInner,
-          padding: EdgeInsets.fromLTRB(20, 10, 20, MediaQuery.of(context).padding.bottom + 20),
-          child: SizedBox(
-            width: double.infinity, // Membuat tombol Simpan memenuhi lebar
-            child: ElevatedButton(
-              onPressed: _isLoading ? null : _submitData,
-              style: ElevatedButton.styleFrom(
-                backgroundColor: buttonColor, 
-                padding: const EdgeInsets.symmetric(vertical: 16), 
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)), 
-                elevation: 0
-              ),
-              child: _isLoading 
+          bottomNavigationBar: Container(
+            color: bgInner,
+            padding: EdgeInsets.fromLTRB(20, 10, 20, MediaQuery.of(context).padding.bottom + 20),
+            child: SizedBox(
+              width: double.infinity, 
+              child: ElevatedButton(
+                onPressed: _isLoading ? null : _submitData,
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: buttonColor, 
+                  padding: const EdgeInsets.symmetric(vertical: 16), 
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)), 
+                  elevation: 0
+                ),
+                child: _isLoading 
                   ? const SizedBox(height: 24, width: 24, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 3))
                   : const Text('Simpan Data Pemeriksaan', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.white)),
+              ),
             ),
           ),
         ),

@@ -9,6 +9,7 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
+  url_launcher: ^6.2.0
   http: ^1.2.0  # Tambahkan baris ini
 
   # UI & Styling
@@ -38,7 +39,8 @@ dev_dependencies:
   flutter_test:
     sdk: flutter
   flutter_lints: ^6.0.0
-  url_launcher: ^6.2.0
+  flutter_launcher_icons: ^0.13.1
+
 
 flutter:
   uses-material-design: true
@@ -46,3 +48,11 @@ flutter:
   # Cukup daftarin foldernya aja, otomatis semua file di dalamnya kebaca
   assets:
     - assets/
+    
+flutter_launcher_icons:
+  image_path: "assets/logo_momnjo.png" 
+  web:
+    generate: true
+    image_path: "assets/logo_momnjo.png"
+    background_color: "#FFFFFF" 
+    theme_color: "#FFFFFF"
