@@ -1,6 +1,6 @@
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'dart:convert';
 import 'package:therapist_momnjo/data/api_service.dart'; // Pastikan import ApiService ada
 
 class LeaveManagementScreen extends StatefulWidget {
@@ -20,9 +20,8 @@ class _LeaveManagementScreenState extends State<LeaveManagementScreen> {
   bool _isOnDuty = false; 
   double _dragValue = 0.0; 
   bool _isDragging = false;
-  bool _isSubmitting = false; // Mencegah spam API saat sedang loading
+  bool _isSubmitting = false; 
 
-  // Variabel untuk menyimpan nama user yang login
   String _therapistName = 'Memuat...';
 
   DateTime? _filterStartDate;
@@ -33,134 +32,137 @@ class _LeaveManagementScreenState extends State<LeaveManagementScreen> {
   @override
   void initState() {
     super.initState();
-    _loadDutyStatus();
+    _loadInitialData();
   }
 
-  // --- ARSITEKTUR MEMORI: MEMBACA STATUS, NAMA USER, DAN RIWAYAT ---
-  Future<void> _loadDutyStatus() async {
+  // --- PERBAIKAN ARSITEKTUR: SUMBER KEBENARAN DARI API SERVER ---
+  Future<void> _loadInitialData() async {
     final prefs = await SharedPreferences.getInstance();
     if (!mounted) return;
     
-    // 1. Load Nama Terapis yang Login (Pastikan diset saat halaman Login)
+    // 1. Load Nama Terapis dan Status Toggle dari Local 
     String? savedName = prefs.getString('user_name') ?? prefs.getString('nama_lengkap');
-    
-    // 2. Load Riwayat Absensi Lokal
-    final String? savedHistory = prefs.getString('attendance_history');
-    if (savedHistory != null) {
-      try {
-        final List<dynamic> decodedHistory = jsonDecode(savedHistory);
-        _attendanceHistory = decodedHistory.map((e) => Map<String, dynamic>.from(e)).toList();
-      } catch (e) {
-        debugPrint('Gagal membaca riwayat absensi: $e');
-      }
+    bool currentDutyStatus = prefs.getBool('is_on_duty') ?? false;
+
+    // 2. Load Riwayat Absensi LANGSUNG DARI SERVER API
+    await _fetchHistoryFromServer();
+
+    if (mounted) {
+      setState(() {
+        _therapistName = (savedName != null && savedName.isNotEmpty) ? savedName : 'Terapis (Belum diset)';
+        _isOnDuty = currentDutyStatus;
+        _dragValue = _isOnDuty ? 1.0 : 0.0;
+        _isDataLoaded = true;
+      });
     }
-
-    setState(() {
-      _therapistName = (savedName != null && savedName.isNotEmpty) ? savedName : 'Terapis (Belum diset)';
-      _isOnDuty = prefs.getBool('is_on_duty') ?? false;
-      _dragValue = _isOnDuty ? 1.0 : 0.0;
-      _isDataLoaded = true;
-    });
   }
 
-  Future<void> _saveAttendanceHistory() async {
-    final prefs = await SharedPreferences.getInstance();
-    final String encodedHistory = jsonEncode(_attendanceHistory);
-    await prefs.setString('attendance_history', encodedHistory);
-  }
-
-  String _getCurrentTime() {
-    final now = DateTime.now();
-    return '${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')} WIB';
-  }
-
-  String _getCurrentDateStr() {
-    final now = DateTime.now();
-    const months = ['Jan', 'Feb', 'Mar', 'Apr', 'Mei', 'Jun', 'Jul', 'Agt', 'Sep', 'Okt', 'Nov', 'Des'];
-    return '${now.day.toString().padLeft(2, '0')} ${months[now.month - 1]} ${now.year}';
-  }
-
-  DateTime? _parseDateStr(String dateStr) {
-    const months = ['Jan', 'Feb', 'Mar', 'Apr', 'Mei', 'Jun', 'Jul', 'Agt', 'Sep', 'Okt', 'Nov', 'Des'];
+  // --- FUNGSI PARSING JSON YANG SUDAH DIPERBAIKI ---
+  Future<void> _fetchHistoryFromServer() async {
     try {
-      final parts = dateStr.split(' ');
-      if (parts.length == 3) {
-        int day = int.parse(parts[0]);
-        int month = months.indexOf(parts[1]) + 1;
-        int year = int.parse(parts[2]);
-        return DateTime(year, month, day);
+      final apiResult = await ApiService().getAttendanceHistory();
+      
+      if (apiResult['success'] == true && apiResult['data'] != null) {
+        
+        // Membaca object 'history' di dalam object 'data'
+        final dataMap = apiResult['data'] as Map<String, dynamic>;
+        final List<dynamic> rawData = dataMap['history'] ?? [];
+        
+        setState(() {
+          _attendanceHistory = rawData.map((item) {
+            final mapItem = Map<String, dynamic>.from(item);
+            
+            // Ekstrak nested object
+            final checkInMap = mapItem['check_in'] as Map<String, dynamic>?;
+            final checkOutMap = mapItem['check_out'] as Map<String, dynamic>?;
+
+            // Helper untuk mengambil jam dari format "2026-06-17 09:58:06" menjadi "09:58 WIB"
+            String formatTime(String? datetime) {
+              if (datetime == null || datetime.isEmpty) return '--';
+              try {
+                final timePart = datetime.split(' ').last; 
+                if (timePart.length >= 5) {
+                  final hm = timePart.substring(0, 5); 
+                  return '$hm WIB';
+                }
+                return timePart;
+              } catch (_) {
+                return datetime;
+              }
+            }
+
+            // Helper untuk memoles tanggal
+            String formatDateLabel(String? rawDate) {
+              if (rawDate == null || rawDate.isEmpty) return '-';
+              try {
+                DateTime dt = DateTime.parse(rawDate);
+                const months = ['Jan', 'Feb', 'Mar', 'Apr', 'Mei', 'Jun', 'Jul', 'Agt', 'Sep', 'Okt', 'Nov', 'Des'];
+                return '${dt.day.toString().padLeft(2, '0')} ${months[dt.month - 1]} ${dt.year}';
+              } catch (e) {
+                return rawDate;
+              }
+            }
+
+            return {
+              'type': 'Absensi Reguler', 
+              'date': formatDateLabel(mapItem['tanggal']),
+              'in': formatTime(checkInMap?['waktu']),
+              'out': formatTime(checkOutMap?['waktu']),
+              'status': 'Hadir', 
+              'reason': (mapItem['catatan'] != null && mapItem['catatan'].toString().isNotEmpty) 
+                          ? mapItem['catatan'] 
+                          : null,
+            };
+          }).toList();
+        });
+      } else {
+        setState(() => _attendanceHistory = []);
       }
     } catch (e) {
-      return null;
+      debugPrint("Gagal mengambil data riwayat dari server: $e");
     }
-    return null;
   }
 
-  // 🔥 PERBAIKAN: MENGIRIM DATA ABSENSI KE SERVER API ADMIN
+  // 🔥 LOGIKA TOGGLE ABSENSI
   Future<void> _handleDutyToggle(bool newDutyStatus) async {
     if (_isOnDuty == newDutyStatus || _isSubmitting) {
-      // Jika statusnya sama, atau sedang dalam proses tembak API, abaikan.
       setState(() => _dragValue = _isOnDuty ? 1.0 : 0.0);
       return; 
     }
 
-    setState(() {
-      _isSubmitting = true;
-    });
+    setState(() { _isSubmitting = true; });
 
     _showInfoMessage('Memproses absensi ke server...');
 
-    // 1. Tentukan jenis aksi
     String action = newDutyStatus ? 'check_in' : 'check_out';
-
-    // 2. Tembak API Backend
     final apiResult = await ApiService().submitAttendance(action: action);
 
-    // 3. Evaluasi hasil dari backend
     if (apiResult['success'] == true || apiResult['status'] == 'success') {
       
-      // Jika Backend berhasil mencatat, baru update di Lokal HP
       final prefs = await SharedPreferences.getInstance();
       await prefs.setBool('is_on_duty', newDutyStatus);
 
-      setState(() {
-        _isOnDuty = newDutyStatus;
-        _dragValue = _isOnDuty ? 1.0 : 0.0;
-        _isSubmitting = false;
+      // Paksa HP mengambil ulang data terbaru dari Server setelah sukses absen
+      await _fetchHistoryFromServer();
 
-        final currentTime = _getCurrentTime();
-        final currentDate = _getCurrentDateStr();
-
-        if (_isOnDuty) {
-          _attendanceHistory.insert(0, {
-            'type': 'Catatan Harian',
-            'date': currentDate,
-            'in': currentTime,
-            'out': '--', 
-            'status': 'Hadir',
-            'reason': null,
-          });
-          _showInfoMessage('Berhasil Absen Masuk (On Duty)');
-        } else {
-          for (var record in _attendanceHistory) {
-            if (record['out'] == '--') {
-              record['out'] = currentTime; 
-              break; 
-            }
-          }
-          _showInfoMessage('Berhasil Absen Keluar (Off Duty)');
-        }
-      });
-
-      await _saveAttendanceHistory();
+      if (mounted) {
+        setState(() {
+          _isOnDuty = newDutyStatus;
+          _dragValue = _isOnDuty ? 1.0 : 0.0;
+          _isSubmitting = false;
+        });
+        
+        _showInfoMessage(newDutyStatus ? 'Berhasil Absen Masuk (On Duty)' : 'Berhasil Absen Keluar (Off Duty)');
+      }
 
     } else {
-      // Jika Backend Gagal / Ditolak (misal di luar jam kerja, atau server error)
-      setState(() {
-        _isSubmitting = false;
-        _dragValue = _isOnDuty ? 1.0 : 0.0; // Kembalikan posisi slider ke semula
-      });
-      _showInfoMessage(apiResult['message'] ?? 'Gagal absensi ke server.', isError: true);
+      if (mounted) {
+        setState(() {
+          _isSubmitting = false;
+          _dragValue = _isOnDuty ? 1.0 : 0.0; 
+        });
+        _showInfoMessage(apiResult['message'] ?? 'Gagal absensi ke server.', isError: true);
+      }
     }
   }
 
@@ -218,6 +220,23 @@ class _LeaveManagementScreenState extends State<LeaveManagementScreen> {
     return '${date.day.toString().padLeft(2, '0')} ${months[date.month - 1]} ${date.year}';
   }
 
+  // --- KEMBALIKAN FUNGSI INI AGAR FILTER TANGGAL BERFUNGSI ---
+  DateTime? _parseDateStr(String dateStr) {
+    const months = ['Jan', 'Feb', 'Mar', 'Apr', 'Mei', 'Jun', 'Jul', 'Agt', 'Sep', 'Okt', 'Nov', 'Des'];
+    try {
+      final parts = dateStr.split(' ');
+      if (parts.length == 3) {
+        int day = int.parse(parts[0]);
+        int month = months.indexOf(parts[1]) + 1;
+        int year = int.parse(parts[2]);
+        return DateTime(year, month, day);
+      }
+    } catch (e) {
+      return null;
+    }
+    return null;
+  }
+
   @override
   Widget build(BuildContext context) {
     return Container(
@@ -252,14 +271,12 @@ class _LeaveManagementScreenState extends State<LeaveManagementScreen> {
                 _buildProfileHeader(),
                 const SizedBox(height: 24),
                 
-                // Judul Section Absensi
                 Text(
                   'Riwayat Kehadiran', 
                   style: TextStyle(fontSize: 16, fontWeight: FontWeight.w900, color: textDarkBrown)
                 ),
                 const SizedBox(height: 16),
                 
-                // Menampilkan hanya Riwayat Absensi
                 _buildAttendanceHistory(),
                 
                 const SizedBox(height: 40),
@@ -289,7 +306,6 @@ class _LeaveManagementScreenState extends State<LeaveManagementScreen> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    // --- NAMA BERDASARKAN USER YANG LOGIN ---
                     Text(_therapistName, style: TextStyle(fontSize: 18, fontWeight: FontWeight.w900, color: textDarkBrown)),
                     Text('Terapis', style: TextStyle(color: Colors.grey.shade500, fontSize: 14, fontWeight: FontWeight.w500)),
                   ],
@@ -318,7 +334,7 @@ class _LeaveManagementScreenState extends State<LeaveManagementScreen> {
                   },
                   onHorizontalDragStart: (_) => setState(() => _isDragging = true),
                   onHorizontalDragUpdate: (details) {
-                    if (_isSubmitting) return; // Kunci jika sedang proses API
+                    if (_isSubmitting) return; 
                     setState(() {
                       double currentLeft = (_dragValue * maxDrag) + details.delta.dx;
                       _dragValue = (currentLeft / maxDrag).clamp(0.0, 1.0);
@@ -329,7 +345,6 @@ class _LeaveManagementScreenState extends State<LeaveManagementScreen> {
                       _isDragging = false;
                     });
                     
-                    // Pastikan ditarik sampai lebih dari 50%
                     bool shouldBeOnDuty = _dragValue > 0.5;
                     _handleDutyToggle(shouldBeOnDuty);
                   },
@@ -428,7 +443,7 @@ class _LeaveManagementScreenState extends State<LeaveManagementScreen> {
             padding: const EdgeInsets.symmetric(vertical: 20),
             child: Center(
               child: Text(
-                'Tidak ada riwayat absensi pada rentang tanggal tersebut.', 
+                _isDataLoaded ? 'Tidak ada riwayat absensi pada rentang tanggal tersebut.' : 'Memuat riwayat dari server...', 
                 style: TextStyle(color: Colors.grey.shade600, fontSize: 13, fontStyle: FontStyle.italic),
                 textAlign: TextAlign.center,
               ),
@@ -444,7 +459,6 @@ class _LeaveManagementScreenState extends State<LeaveManagementScreen> {
     Color badgeBgColor;
     Color badgeTextColor;
     
-    // Pengecekan disesuaikan dengan bahasa Indonesia
     if (data['status'] == 'Hadir') {
       badgeBgColor = Colors.green.shade100;
       badgeTextColor = Colors.green.shade800;
