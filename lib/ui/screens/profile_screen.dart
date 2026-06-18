@@ -15,8 +15,8 @@ class ProfileScreen extends StatefulWidget {
 class _ProfileScreenState extends State<ProfileScreen> {
   final Color primaryPink = const Color(0xFFE8647C); 
   
-  // 🔥 PRAKTIK TERBAIK: Pindahkan URL ini ke file konfigurasi global nantinya!
-  final String baseImageUrl = "https://dashboard.momnjo.my.id/assets/images";
+  // 🔥 PRAKTIK TERBAIK: Menggunakan URL global dari ApiService
+  final String baseImageUrl = ApiService.baseImageUrl;
 
   // --- STATE VARIABLE UNTUK DATA DINAMIS ---
   String _therapistName = "Memuat...";
@@ -51,11 +51,20 @@ class _ProfileScreenState extends State<ProfileScreen> {
       String id = prefs.getString('username') ?? prefs.getString('id_terapis') ?? 'TRP-000';
       String branch = prefs.getString('gerai') ?? prefs.getString('branch') ?? '-'; 
       
+      // Load Foto dari Cache (Tambahkan base url jika cuma nama file)
+      String cachedFoto = prefs.getString('foto_profil') ?? '';
+      if (cachedFoto.isNotEmpty && cachedFoto != "null" && cachedFoto != "-") {
+         if (!cachedFoto.startsWith('http')) {
+           cachedFoto = "$baseImageUrl/$cachedFoto";
+         }
+      }
+
       if (mounted) {
         setState(() {
           _therapistName = name.isEmpty ? id : name; 
           _therapistId = id;
           _gerai = branch; 
+          _avatarUrl = cachedFoto;
         });
       }
 
@@ -71,7 +80,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
       if (mounted) {
         setState(() {
-          // --- A. UPDATE DARI PROFILE API (Nama, Avatar, Rating) ---
+          // VARIABEL SEMENTARA UNTUK MENAMPUNG FOTO
+          String rawFoto = "";
+
+          // --- A. UPDATE DARI PROFILE API (Nama, Rating) ---
           if (profileResponse['success'] == true || profileResponse['status'] == 'success') {
             final data = profileResponse['data'];
             
@@ -97,22 +109,18 @@ class _ProfileScreenState extends State<ProfileScreen> {
             }
 
             _reviewCount = data['total_reviews']?.toString() ?? '0';
-            
-            // 🔥 PERBAIKAN DI SINI: Menggunakan variabel baseImageUrl
-            if (data['avatar_url'] != null) {
-              _avatarUrl = data['avatar_url'];
-            } else if (data['avatar'] != null && data['avatar'].toString().isNotEmpty) {
-              _avatarUrl = "$baseImageUrl/${data['avatar']}";
-            }
 
             // Cek jika API profile punya gerai (fallback awal)
             String fetchedGeraiProfile = data['gerai']?.toString() ?? data['branch']?.toString() ?? '';
             if (fetchedGeraiProfile.trim().isNotEmpty && fetchedGeraiProfile != 'null') {
               _gerai = fetchedGeraiProfile;
             }
+
+            // Fallback foto jika di getDataDiri tidak ada
+            rawFoto = data['avatar_url']?.toString() ?? data['avatar']?.toString() ?? "";
           }
 
-          // --- B. UPDATE DARI DATA DIRI API (Khusus memastikan Gerai) ---
+          // --- B. UPDATE DARI DATA DIRI API (Gerai & Foto Profil Utama) ---
           if (dataDiriResponse['success'] == true || dataDiriResponse['status'] == 'success') {
             dynamic rawDataDiri = dataDiriResponse['data'];
             Map<String, dynamic> safeDataDiri = {};
@@ -129,6 +137,28 @@ class _ProfileScreenState extends State<ProfileScreen> {
             if (fetchedGeraiDataDiri.trim().isNotEmpty && fetchedGeraiDataDiri != 'null' && fetchedGeraiDataDiri != '-') {
               _gerai = fetchedGeraiDataDiri; // Timpa dengan data dari get_data_diri.php
             }
+
+            // Ambil foto profil dari Data Diri (prioritas tertinggi karena fitur upload ada di sini)
+            String fetchFotoDiri = safeDataDiri['foto_profil']?.toString() ?? safeDataDiri['foto']?.toString() ?? safeDataDiri['image']?.toString() ?? "";
+            if (fetchFotoDiri.isNotEmpty && fetchFotoDiri != "null") {
+              rawFoto = fetchFotoDiri;
+            }
+          }
+
+          // --- PROSES KOMPILASI FOTO (Mencegah Cache Nyangkut) ---
+          String remoteFoto = "";
+          if (rawFoto.isNotEmpty && rawFoto != "null" && rawFoto != "-") {
+             if (rawFoto.startsWith('http')) {
+               remoteFoto = rawFoto;
+             } else {
+               remoteFoto = "$baseImageUrl/$rawFoto"; 
+             }
+          }
+
+          if (remoteFoto.isNotEmpty) {
+            // Bypass cache dengan millis timestamp
+            _avatarUrl = "$remoteFoto?v=${DateTime.now().millisecondsSinceEpoch}";
+            prefs.setString('foto_profil', rawFoto); // Simpan hanya nama filenya ke cache
           }
 
           // Bersihkan text jika gerai tetap gagal diload
@@ -264,13 +294,24 @@ class _ProfileScreenState extends State<ProfileScreen> {
             ),
             child: CircleAvatar(
               radius: 36,
-              // Menambahkan penanganan error untuk gambar yang gagal dimuat
+              backgroundColor: Colors.grey.shade200,
+              // Penanganan error jika gambar 404/rusak di server
               onBackgroundImageError: (exception, stackTrace) {
                  debugPrint("Gagal memuat gambar avatar: $exception");
+                 // Gunakan addPostFrameCallback agar tidak tabrakan dengan proses build layar
+                 if (_avatarUrl.isNotEmpty) {
+                   WidgetsBinding.instance.addPostFrameCallback((_) {
+                     if (mounted) {
+                       setState(() {
+                         _avatarUrl = ""; // Kembalikan ke foto inisial (fallback)
+                       });
+                     }
+                   });
+                 }
               },
               backgroundImage: _avatarUrl.isNotEmpty 
                   ? NetworkImage(_avatarUrl)
-                  : const NetworkImage('https://ui-avatars.com/api/?name=Mom+N+Jo&background=E8647C&color=fff'), 
+                  : NetworkImage('https://ui-avatars.com/api/?name=${Uri.encodeComponent(_therapistName.isNotEmpty ? _therapistName : "Terapis")}&background=E8647C&color=fff'), 
             ),
           ),
           const SizedBox(width: 16),
@@ -398,7 +439,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
             Navigator.push(
               context,
               MaterialPageRoute(builder: (context) => const DataDiriScreen()),
-            );
+            ).then((_) {
+              // Refresh otomatis jika gambar diubah di layar Data Diri
+              _loadProfileData(); 
+            });
           }),
           _buildMenuDivider(),
           
@@ -413,7 +457,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
             Navigator.push(
               context,
               MaterialPageRoute(builder: (context) => const SettingsScreen()),
-            );
+            ).then((_) {
+              // Refresh otomatis jika gambar diubah di layar Settings (meskipun diarahkan ke Data Diri jg)
+              _loadProfileData(); 
+            });
           }),
           _buildMenuDivider(),
           

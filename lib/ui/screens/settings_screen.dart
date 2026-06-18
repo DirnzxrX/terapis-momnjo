@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:therapist_momnjo/data/api_service.dart'; // Import ApiService
+import 'package:therapist_momnjo/data/api_service.dart';
+import 'package:therapist_momnjo/ui/screens/data_diri_screen.dart'; // Pastikan path import ini sesuai
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({Key? key}) : super(key: key);
@@ -18,7 +19,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
   String _userName = 'Terapis';
   String _userPhone = '';
   String _idTerapis = '';
-  String _fotoProfil = 'https://i.pravatar.cc/150?img=5';
+  String _fotoProfil = ''; // Inisialisasi kosong, fallback ditangani di method build
+
+  // Default fallback image
+  final String _defaultAvatar = 'https://ui-avatars.com/api/?name=Terapis&background=F48FB1&color=fff';
 
   @override
   void initState() {
@@ -34,7 +38,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
       // 1. Ambil data lokal dulu untuk tampilan cepat (Instant UI)
       SharedPreferences prefs = await SharedPreferences.getInstance();
       setState(() {
-        // Cek berbagai kemungkinan key yang mungkin disimpan saat login
         _userName = prefs.getString('fullname') ?? 
                     prefs.getString('nama_lengkap') ?? 
                     prefs.getString('nama') ?? 'Terapis';
@@ -42,38 +45,60 @@ class _SettingsScreenState extends State<SettingsScreen> {
         _userPhone = prefs.getString('no_telepon') ?? 
                      prefs.getString('phone') ?? '';
         
-        _idTerapis = prefs.getString('username') ?? 
+        _idTerapis = prefs.getString('no_pegawai') ?? 
+                     prefs.getString('username') ?? 
                      prefs.getString('id_terapis') ?? '';
         
-        _fotoProfil = prefs.getString('foto_profil') ?? 'https://i.pravatar.cc/150?img=5';
+        // --- PERBAIKAN: Cek cache foto lokal dan tambahkan baseImageUrl jika perlu ---
+        String localFoto = prefs.getString('foto_profil') ?? '';
+        if (localFoto.isNotEmpty && localFoto != "null" && localFoto != "-") {
+           if (!localFoto.startsWith('http')) {
+             localFoto = "${ApiService.baseImageUrl}/$localFoto";
+           }
+        }
+        _fotoProfil = localFoto;
       });
 
       // 2. Tarik data terbaru dari server (Sync Data)
-      final response = await ApiService().getProfile();
+      // MENGGUNAKAN getDataDiri() KARENA ENDPOINT INI YANG MEMILIKI FOTO PROFIL (Sama dengan DataDiriScreen)
+      final response = await ApiService().getDataDiri();
 
-      // Backend Momnjo biasanya menggunakan field 'status' atau 'success'
       if ((response['success'] == true || response['status'] == 'success') && response['data'] != null) {
         final data = response['data'];
         
-        // Ambil nama dari berbagai kemungkinan key dari respon profil
         String remoteName = data['nama_lengkap'] ?? data['fullname'] ?? data['name'] ?? data['nama'] ?? _userName;
         String remotePhone = data['no_telepon'] ?? data['phone'] ?? data['telepon'] ?? _userPhone;
-        String remoteId = data['id_terapis'] ?? data['username'] ?? data['id']?.toString() ?? _idTerapis;
-        String remoteFoto = data['foto'] ?? data['foto_profil'] ?? data['image'] ?? _fotoProfil;
+        // DataDiriScreen menggunakan no_pegawai
+        String remoteId = data['no_pegawai'] ?? data['id_terapis'] ?? data['username'] ?? data['id']?.toString() ?? _idTerapis;
+        
+        // --- LOGIKA PERBAIKAN FOTO PROFIL ---
+        String rawFoto = data['foto_profil']?.toString() ?? data['foto']?.toString() ?? data['image']?.toString() ?? "";
+        String remoteFoto = "";
+        
+        if (rawFoto.isNotEmpty && rawFoto != "null" && rawFoto != "-") {
+           // Cek apakah server mengembalikan full URL (http...) atau hanya nama file
+           if (rawFoto.startsWith('http')) {
+             remoteFoto = rawFoto;
+           } else {
+             // Jika hanya nama file, gabungkan dengan baseImageUrl dari ApiService
+             remoteFoto = "${ApiService.baseImageUrl}/$rawFoto"; 
+           }
+        }
 
         setState(() {
           _userName = remoteName;
           _userPhone = remotePhone;
           _idTerapis = remoteId;
-          _fotoProfil = remoteFoto;
+          // Bypass cache jika gambar baru diupload dengan nambah query parameter unik (timestamp)
+          _fotoProfil = remoteFoto.isNotEmpty ? "$remoteFoto?v=${DateTime.now().millisecondsSinceEpoch}" : "";
         });
 
-        // 3. Update SharedPreferences agar sinkron di halaman lain (Home/Profile)
+        // 3. Update SharedPreferences agar sinkron
         await prefs.setString('nama_lengkap', remoteName);
         await prefs.setString('fullname', remoteName);
         await prefs.setString('no_telepon', remotePhone);
-        await prefs.setString('foto_profil', remoteFoto);
-        if (remoteId.isNotEmpty) await prefs.setString('id_terapis', remoteId);
+        if (rawFoto.isNotEmpty) await prefs.setString('foto_profil', rawFoto); // Simpan rawFoto (nama file) agar tidak dobel URL
+        if (remoteId.isNotEmpty) await prefs.setString('no_pegawai', remoteId);
       }
     } catch (e) {
       debugPrint("Gagal memuat profil: $e");
@@ -85,134 +110,121 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   // --- HELPER UNTUK MENAMPILKAN PESAN (SNACKBAR) ---
-  void _showInfoMessage(String message) {
+  void _showInfoMessage(String message, {bool isError = false}) {
+    if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: Text(message),
+        content: Text(message, style: const TextStyle(color: Colors.white)),
         behavior: SnackBarBehavior.floating,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-        backgroundColor: Colors.grey.shade800,
-        duration: const Duration(seconds: 2),
+        backgroundColor: isError ? Colors.red.shade600 : Colors.green.shade700,
+        duration: const Duration(seconds: 3),
       ),
     );
   }
 
-  // --- FITUR 1: EDIT PROFIL ---
-  void _showEditProfileDialog() {
-    final nameController = TextEditingController(text: _userName);
-    final phoneController = TextEditingController(text: _userPhone);
-
-    showDialog(
-      context: context,
-      builder: (context) {
-        return AlertDialog(
-          title: const Text('Edit Profil', style: TextStyle(fontWeight: FontWeight.bold)),
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              TextField(
-                controller: nameController,
-                decoration: InputDecoration(
-                  labelText: 'Nama Lengkap',
-                  focusedBorder: UnderlineInputBorder(borderSide: BorderSide(color: primaryPink)),
-                ),
-              ),
-              const SizedBox(height: 12),
-              TextField(
-                controller: phoneController,
-                decoration: InputDecoration(
-                  labelText: 'Nomor Telepon',
-                  focusedBorder: UnderlineInputBorder(borderSide: BorderSide(color: primaryPink)),
-                ),
-                keyboardType: TextInputType.phone,
-              ),
-            ],
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: Text('Batal', style: TextStyle(color: Colors.grey.shade600, fontWeight: FontWeight.bold)),
-            ),
-            ElevatedButton(
-              onPressed: () async {
-                SharedPreferences prefs = await SharedPreferences.getInstance();
-                await prefs.setString('fullname', nameController.text);
-                await prefs.setString('no_telepon', phoneController.text);
-
-                setState(() {
-                  _userName = nameController.text;
-                  _userPhone = phoneController.text;
-                });
-
-                if (context.mounted) Navigator.pop(context);
-                _showInfoMessage('Profil berhasil diperbarui!');
-              },
-              style: ElevatedButton.styleFrom(
-                backgroundColor: primaryPink,
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-              ),
-              child: const Text('Simpan', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
-            ),
-          ],
-        );
-      },
-    );
-  }
-
-  // --- FITUR 2: UBAH KATA SANDI ---
+  // --- FITUR 2: UBAH KATA SANDI (REAL API INTEGRATION) ---
   void _showChangePasswordDialog() {
+    final oldPasswordCtrl = TextEditingController();
+    final newPasswordCtrl = TextEditingController();
+    final confirmPasswordCtrl = TextEditingController();
+    bool isSubmitting = false;
+
     showDialog(
       context: context,
+      barrierDismissible: false, 
       builder: (context) {
-        return AlertDialog(
-          title: const Text('Email & Kata Sandi', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              TextField(
-                obscureText: true, 
-                decoration: InputDecoration(
-                  labelText: 'Kata Sandi Saat Ini',
-                  focusedBorder: UnderlineInputBorder(borderSide: BorderSide(color: primaryPink)),
+        return StatefulBuilder(
+          builder: (context, setStateDialog) {
+            return AlertDialog(
+              title: const Text('Ubah Kata Sandi', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+              content: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    TextField(
+                      controller: oldPasswordCtrl,
+                      obscureText: true, 
+                      decoration: InputDecoration(
+                        labelText: 'Kata Sandi Saat Ini',
+                        focusedBorder: UnderlineInputBorder(borderSide: BorderSide(color: primaryPink)),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: newPasswordCtrl,
+                      obscureText: true, 
+                      decoration: InputDecoration(
+                        labelText: 'Kata Sandi Baru',
+                        focusedBorder: UnderlineInputBorder(borderSide: BorderSide(color: primaryPink)),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: confirmPasswordCtrl,
+                      obscureText: true, 
+                      decoration: InputDecoration(
+                        labelText: 'Konfirmasi Kata Sandi Baru',
+                        focusedBorder: UnderlineInputBorder(borderSide: BorderSide(color: primaryPink)),
+                      ),
+                    ),
+                  ],
                 ),
               ),
-              const SizedBox(height: 12),
-              TextField(
-                obscureText: true, 
-                decoration: InputDecoration(
-                  labelText: 'Kata Sandi Baru',
-                  focusedBorder: UnderlineInputBorder(borderSide: BorderSide(color: primaryPink)),
+              actions: [
+                TextButton(
+                  onPressed: isSubmitting ? null : () => Navigator.pop(context),
+                  child: Text('Batal', style: TextStyle(color: isSubmitting ? Colors.grey : Colors.grey.shade600, fontWeight: FontWeight.bold)),
                 ),
-              ),
-              const SizedBox(height: 12),
-              TextField(
-                obscureText: true, 
-                decoration: InputDecoration(
-                  labelText: 'Konfirmasi Kata Sandi Baru',
-                  focusedBorder: UnderlineInputBorder(borderSide: BorderSide(color: primaryPink)),
+                ElevatedButton(
+                  onPressed: isSubmitting ? null : () async {
+                    // 1. Validasi Lokal
+                    if (oldPasswordCtrl.text.isEmpty || newPasswordCtrl.text.isEmpty || confirmPasswordCtrl.text.isEmpty) {
+                      _showInfoMessage('Semua kolom harus diisi!', isError: true);
+                      return;
+                    }
+                    if (newPasswordCtrl.text != confirmPasswordCtrl.text) {
+                      _showInfoMessage('Kata sandi baru dan konfirmasi tidak cocok!', isError: true);
+                      return;
+                    }
+                    if (newPasswordCtrl.text.length < 6) {
+                      _showInfoMessage('Kata sandi baru minimal 6 karakter!', isError: true);
+                      return;
+                    }
+
+                    // 2. Eksekusi API
+                    setStateDialog(() => isSubmitting = true);
+                    
+                    try {
+                      final response = await ApiService().changePassword(
+                        oldPasswordCtrl.text,
+                        newPasswordCtrl.text,
+                      );
+
+                      if (response['success'] == true) {
+                        if (context.mounted) Navigator.pop(context);
+                        _showInfoMessage(response['message'] ?? 'Kata sandi berhasil diubah!');
+                      } else {
+                        _showInfoMessage(response['message'] ?? 'Gagal mengubah kata sandi', isError: true);
+                      }
+                    } catch (e) {
+                      _showInfoMessage('Terjadi kesalahan jaringan.', isError: true);
+                    } finally {
+                      if (mounted) setStateDialog(() => isSubmitting = false);
+                    }
+                  },
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: primaryPink,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                  ),
+                  child: isSubmitting 
+                      ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
+                      : const Text('Simpan', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
                 ),
-              ),
-            ],
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: Text('Batal', style: TextStyle(color: Colors.grey.shade600, fontWeight: FontWeight.bold)),
-            ),
-            ElevatedButton(
-              onPressed: () {
-                Navigator.pop(context);
-                _showInfoMessage('Kata sandi berhasil diubah!');
-              },
-              style: ElevatedButton.styleFrom(
-                backgroundColor: primaryPink,
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-              ),
-              child: const Text('Simpan', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
-            ),
-          ],
+              ],
+            );
+          }
         );
       },
     );
@@ -223,7 +235,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     return Container(
       decoration: const BoxDecoration(
         image: DecorationImage(
-          image: AssetImage('assets/background.png'),
+          image: AssetImage('assets/background.png'), // Ganti dengan path bg kamu jika error
           fit: BoxFit.cover,
         ),
       ),
@@ -263,13 +275,21 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           _buildListTile(
                             icon: Icons.person_outline, 
                             title: 'Edit Profil', 
-                            subtitle: 'Ubah nama & nomor telepon',
-                            onTap: _showEditProfileDialog,
+                            subtitle: 'Ubah kontak, alamat & foto',
+                            onTap: () {
+                              Navigator.push(
+                                context,
+                                MaterialPageRoute(builder: (context) => const DataDiriScreen()),
+                              ).then((_) {
+                                // Refresh tampilan setelah user selesai edit profil dan kembali
+                                _loadSettingsData();
+                              });
+                            },
                           ),
                           _buildDivider(),
                           _buildListTile(
                             icon: Icons.lock_outline, 
-                            title: 'Email & Kata Sandi', 
+                            title: 'Kata Sandi', 
                             subtitle: 'Ubah kata sandi akun',
                             onTap: _showChangePasswordDialog,
                           ),
@@ -287,11 +307,20 @@ class _SettingsScreenState extends State<SettingsScreen> {
   // --- WIDGET COMPONENTS ---
 
   Widget _buildProfileCard() {
-    // Bangun string identitas bawah (ID & No Telp)
     String subtitle = "";
     if (_userPhone.isNotEmpty) subtitle += _userPhone;
     if (_userPhone.isNotEmpty && _idTerapis.isNotEmpty) subtitle += " • ";
     if (_idTerapis.isNotEmpty) subtitle += _idTerapis;
+
+    // Perbaikan penanganan Image
+    ImageProvider avatarImage;
+    if (_fotoProfil.isNotEmpty && _fotoProfil.startsWith('http')) {
+      avatarImage = NetworkImage(_fotoProfil);
+    } else {
+      // Jika string kosong atau bukan URL, gunakan API ui-avatars berdasarkan nama
+      String safeName = Uri.encodeComponent(_userName.isNotEmpty ? _userName : "Terapis");
+      avatarImage = NetworkImage('https://ui-avatars.com/api/?name=$safeName&background=F48FB1&color=fff');
+    }
 
     return Container(
       padding: const EdgeInsets.all(16.0),
@@ -316,12 +345,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
             ),
             child: CircleAvatar(
               radius: 30,
-              backgroundImage: _fotoProfil.startsWith('http') 
-                  ? NetworkImage(_fotoProfil) 
-                  : AssetImage(_fotoProfil) as ImageProvider, 
+              backgroundColor: Colors.grey.shade200,
+              backgroundImage: avatarImage, 
               onBackgroundImageError: (_, __) {
+                // Fallback jika image corrupt / 404
                 setState(() {
-                  _fotoProfil = 'https://i.pravatar.cc/150?img=5';
+                  _fotoProfil = ""; // Set kosong, build ulang pakai ui-avatars
                 });
               },
             ),
@@ -378,12 +407,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
             child: Text(
-               title,
-               style: TextStyle(
-                 fontSize: 16,
-                 fontWeight: FontWeight.bold,
-                 color: textDark,
-               ),
+              title,
+              style: TextStyle(
+                fontSize: 16,
+                fontWeight: FontWeight.bold,
+                color: textDark,
+              ),
             ),
           ),
           ...children,

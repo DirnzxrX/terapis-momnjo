@@ -79,7 +79,6 @@ class _HomeScreenState extends State<HomeScreen> {
       
       String? namaSimpanan = prefs.getString('nama_lengkap') ?? prefs.getString('fullname');
       String? usernameSimpanan = prefs.getString('username');
-      String? fotoSimpanan = prefs.getString('foto'); 
       String namaTampil = 'Terapis'; 
       
       bool isOnDutySimpanan = prefs.getBool('is_on_duty') ?? false;
@@ -90,6 +89,14 @@ class _HomeScreenState extends State<HomeScreen> {
         namaTampil = usernameSimpanan; 
       }
       
+      // --- PERBAIKAN: Load Foto dari Cache dengan baseImageUrl ---
+      String? fotoSimpanan = prefs.getString('foto_profil') ?? prefs.getString('foto'); 
+      if (fotoSimpanan != null && fotoSimpanan.isNotEmpty && fotoSimpanan != "null" && fotoSimpanan != "-") {
+         if (!fotoSimpanan.startsWith('http')) {
+           fotoSimpanan = "${ApiService.baseImageUrl}/$fotoSimpanan";
+         }
+      }
+
       final api = ApiService();
       final String todayStr = DateFormat('yyyy-MM-dd').format(DateTime.now());
       int todayJobsCount = 0;
@@ -155,9 +162,17 @@ class _HomeScreenState extends State<HomeScreen> {
          }
       }
 
-      // 3. FETCH PROFILE
+      // 3. FETCH PROFILE & DATA DIRI (Untuk Foto Akurat)
       try {
-        final profileResponse = await api.getProfile();
+        final responses = await Future.wait([
+          api.getProfile(),
+          api.getDataDiri(),
+        ]);
+        
+        final profileResponse = responses[0];
+        final dataDiriResponse = responses[1];
+        String rawFoto = "";
+
         if (profileResponse['success'] == true || profileResponse['status'] == 'success') {
           final data = profileResponse['data'];
           
@@ -167,12 +182,34 @@ class _HomeScreenState extends State<HomeScreen> {
           }
           namaTampil = fetchedName;
           
-          // 🔥 PERBAIKAN: Menggunakan baseImageUrl dari ApiService
-          if (data['avatar_url'] != null) {
-            fotoSimpanan = data['avatar_url'];
-          } else if (data['avatar'] != null && data['avatar'].toString().isNotEmpty) {
-            fotoSimpanan = "${ApiService.baseImageUrl}/${data['avatar']}";
+          rawFoto = data['avatar_url']?.toString() ?? data['avatar']?.toString() ?? "";
+        }
+
+        if (dataDiriResponse['success'] == true || dataDiriResponse['status'] == 'success') {
+          dynamic rawDataDiri = dataDiriResponse['data'];
+          Map<String, dynamic> safeDataDiri = {};
+          if (rawDataDiri is List && rawDataDiri.isNotEmpty) {
+            safeDataDiri = rawDataDiri[0];
+          } else if (rawDataDiri is Map) {
+            safeDataDiri = Map<String, dynamic>.from(rawDataDiri);
           }
+
+          String fetchFotoDiri = safeDataDiri['foto_profil']?.toString() ?? safeDataDiri['foto']?.toString() ?? safeDataDiri['image']?.toString() ?? "";
+          if (fetchFotoDiri.isNotEmpty && fetchFotoDiri != "null") {
+            rawFoto = fetchFotoDiri;
+          }
+        }
+
+        if (rawFoto.isNotEmpty && rawFoto != "null" && rawFoto != "-") {
+           String remoteFoto = "";
+           if (rawFoto.startsWith('http')) {
+             remoteFoto = rawFoto;
+           } else {
+             remoteFoto = "${ApiService.baseImageUrl}/$rawFoto"; 
+           }
+           // Tambahkan Timestamp agar cache memuat ulang gambar baru
+           fotoSimpanan = "$remoteFoto?v=${DateTime.now().millisecondsSinceEpoch}";
+           await prefs.setString('foto_profil', rawFoto);
         }
       } catch (e) {}
 
@@ -252,8 +289,6 @@ class _HomeScreenState extends State<HomeScreen> {
       debugPrint("Error fetching carousel: $e");
     }
   }
-
-  // 🔥 FUNGSI _toggleDutyStatus DIHAPUS KARENA SANGAT BERBAHAYA (MEM-BYPASS API)!
 
   String _formatTime(String? rawTime) {
     if (rawTime == null || rawTime.isEmpty) return '--:--';
@@ -543,9 +578,21 @@ class _HomeScreenState extends State<HomeScreen> {
         CircleAvatar(
           radius: 28,
           backgroundColor: Colors.grey.shade200,
+          // --- PENANGANAN ERROR JIKA FOTO SERVER 404 ---
+          onBackgroundImageError: (exception, stackTrace) {
+             if (_fotoProfile.isNotEmpty) {
+               WidgetsBinding.instance.addPostFrameCallback((_) {
+                 if (mounted) {
+                   setState(() {
+                     _fotoProfile = ""; // Hapus foto rusak dan panggil UI Avatars
+                   });
+                 }
+               });
+             }
+          },
           backgroundImage: _fotoProfile.isNotEmpty && _fotoProfile.startsWith('http')
               ? NetworkImage(_fotoProfile)
-              : const NetworkImage('https://ui-avatars.com/api/?name=Mom+N+Jo&background=ECA898&color=fff'), 
+              : NetworkImage('https://ui-avatars.com/api/?name=${Uri.encodeComponent(_namaTerapis)}&background=ECA898&color=fff') as ImageProvider, 
         ),
         const SizedBox(width: 12),
         Column(

@@ -1,13 +1,11 @@
 import 'dart:convert';
 import 'package:flutter/foundation.dart'; // Menyediakan kIsWeb
 import 'package:http/http.dart' as http;
-import 'package:http_parser/http_parser.dart'; // 🔥 DITAMBAHKAN UNTUK FIX UPLOAD WEB
+import 'package:http_parser/http_parser.dart'; // DITAMBAHKAN UNTUK FIX UPLOAD WEB
 import 'package:shared_preferences/shared_preferences.dart';
 
 class ApiService {
   static const String baseUrl = "https://dashboard.momnjo.my.id/dev/api_terapis";
-
-  // base URL Gambar
   static const String baseImageUrl = "https://dashboard.momnjo.my.id/assets/images";
 
   // --- HELPER: MENGAMBIL TOKEN & COOKIE ---
@@ -130,7 +128,7 @@ class ApiService {
     }
   }
 
-  // 🔥 PERBAIKAN: Menambahkan MediaType('image', 'jpeg') untuk validasi Backend PHP
+  // Menambahkan MediaType('image', 'jpeg') untuk validasi Backend PHP
   Future<Map<String, dynamic>> _multipartPost(String endpoint, Map<String, String> fields, {String? imagePath}) async {
     final uri = Uri.parse('$baseUrl$endpoint');
 
@@ -157,13 +155,13 @@ class ApiService {
             'image',
             bytes,
             filename: filename,
-            contentType: MediaType('image', 'jpeg'), // 🔥 FIX UNTUK WEB
+            contentType: MediaType('image', 'jpeg'), 
           ));
         } else {
           request.files.add(await http.MultipartFile.fromPath(
             'image', 
             imagePath,
-            contentType: MediaType('image', 'jpeg'), // 🔥 FIX UNTUK MOBILE
+            contentType: MediaType('image', 'jpeg'), 
           ));
         }
       }
@@ -218,7 +216,6 @@ class ApiService {
     return result;
   }
 
-  // Ganti Password (Sesuai Dokumentasi)
   Future<Map<String, dynamic>> changePassword(String oldPassword, String newPassword) async {
     return await _post('/change_password.php', {
       'old_password': oldPassword,
@@ -245,7 +242,6 @@ class ApiService {
     return await _get('/get_job_detail.php', queryParams: {'id_transaksi': idTransaksi});
   }
 
-  // Mengarah ke history.php Sesuai Dokumentasi
   Future<Map<String, dynamic>> getHistoryList() async {
     return await _get('/history.php');
   }
@@ -305,7 +301,6 @@ class ApiService {
     });
   }
 
-  // Mengarah ke rate_customer.php Sesuai Dokumentasi
   Future<Map<String, dynamic>> rateCustomer({
     required String idTransaksi,
     required int rating,
@@ -320,7 +315,6 @@ class ApiService {
     });
   }
 
-  // Tetap asForm: true agar $_POST['id_customer'] tidak dianggap kosong kalau id-nya "0"
   Future<Map<String, dynamic>> storeDataMedis({
     required String idTransaksi,
     required String idCustomer,
@@ -355,7 +349,6 @@ class ApiService {
     return await _post('/store_data_medis.php', fields, asForm: true);
   }
 
-  // Ambil data medis (Sesuai Dokumentasi)
   Future<Map<String, dynamic>> getStoredDataMedis({String? idTransaksi}) async {
     final Map<String, String> params = {};
     if (idTransaksi != null && idTransaksi.isNotEmpty) {
@@ -408,7 +401,6 @@ class ApiService {
     return await _get('/get_balance.php', queryParams: params);
   }
 
-  // Get Earnings (Sesuai Dokumentasi)
   Future<Map<String, dynamic>> getEarnings({String? startDate, String? endDate}) async {
     final Map<String, String> params = {};
     if (startDate != null && startDate.isNotEmpty) params['start_date'] = startDate;
@@ -471,5 +463,32 @@ class ApiService {
     if (endDate != null && endDate.isNotEmpty) params['end_date'] = endDate;
     if (kodeGerai != null && kodeGerai.isNotEmpty) params['kode_gerai'] = kodeGerai;
     return await _get('/get_terapis_report.php', queryParams: params);
+  }
+
+  // =========================================================================
+  // NEW: UPDATE DATA DIRI / PROFILE
+  // =========================================================================
+  Future<Map<String, dynamic>> updateDataDiri({
+    String? namaLengkap, 
+    String? tanggalLahir, // 🔥 DITAMBAHKAN
+    String? email,
+    String? noTelepon,
+    String? alamat,
+    String? imagePath, 
+  }) async {
+    final Map<String, String> fields = {};
+
+    if (namaLengkap != null && namaLengkap.isNotEmpty) fields['nama_lengkap'] = namaLengkap; 
+    
+    // 🔥 DITAMBAHKAN: Mengirim tanggal lahir ke backend
+    if (tanggalLahir != null && tanggalLahir.isNotEmpty) fields['tanggal_lahir'] = tanggalLahir; 
+    
+    if (email != null && email.isNotEmpty) fields['email'] = email;
+    if (noTelepon != null && noTelepon.isNotEmpty) fields['no_telepon'] = noTelepon;
+    if (alamat != null && alamat.isNotEmpty) fields['alamat'] = alamat;
+
+    // Selalu gunakan _multipartPost untuk mematuhi aturan "Wajib multipart/form-data" 
+    // dari tim backend, terlepas dari apakah user melampirkan gambar baru atau tidak.
+    return await _multipartPost('/update_data_diri.php', fields, imagePath: imagePath);
   }
 }

@@ -132,7 +132,7 @@ class _LoginScreenState extends State<LoginScreen> {
                         Image.asset('assets/logo_momnjo.png', width: 120),
                         const SizedBox(height: 12),
                         const Text(
-                          'Therapis Home Care',
+                          'Web Terapis',
                           style: TextStyle(fontSize: 14, fontWeight: FontWeight.w500),
                         ),
                       ],

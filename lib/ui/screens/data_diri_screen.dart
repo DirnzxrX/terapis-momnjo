@@ -1,7 +1,10 @@
+import 'dart:io';
+import 'package:flutter/foundation.dart' show kIsWeb; // Tambahkan ini untuk mengecek Web/Mobile
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:therapist_momnjo/data/api_service.dart'; // Import ApiService
+import 'package:therapist_momnjo/data/api_service.dart';
 import 'package:intl/intl.dart';
+import 'package:image_picker/image_picker.dart';
 
 class DataDiriScreen extends StatefulWidget {
   const DataDiriScreen({Key? key}) : super(key: key);
@@ -14,17 +17,29 @@ class _DataDiriScreenState extends State<DataDiriScreen> {
   final Color textDarkBrown = const Color(0xFF4A332B);
   final Color primaryPeach = const Color(0xFFECA898);
 
-  // --- STATE VARIABEL UNTUK DATA DINAMIS ---
   bool _isLoading = true;
-  String _namaLengkap = "-";
-  String _noTelepon = "-";
-  String _email = "-";
-  String _tanggalLahir = "-";
-  String _jenisKelamin = "-";
-  String _alamat = "-";
+  bool _isEditing = false;
+  bool _isSaving = false;
+
+  // Variabel Data Statis (Tidak bisa diubah)
   String _noPegawai = "-";
   String _gerai = "-";
-  String _fotoProfil = ""; 
+  String _fotoProfil = "";
+  String _namaAsliUntukAvatar = "Mom N Jo"; 
+
+  // Variabel Data Dinamis (Bisa diubah - Tanggal Lahir)
+  String _tanggalLahirTampil = "-"; 
+  String _tanggalLahirRaw = "";     
+
+  // Controllers untuk Data Dinamis (Bisa diubah - Teks)
+  final TextEditingController _nameCtrl = TextEditingController(); 
+  final TextEditingController _emailCtrl = TextEditingController();
+  final TextEditingController _phoneCtrl = TextEditingController();
+  final TextEditingController _addressCtrl = TextEditingController();
+  
+  // PERUBAHAN 1: Gunakan XFile, bukan File dari dart:io
+  XFile? _selectedImage;
+  final ImagePicker _picker = ImagePicker();
 
   @override
   void initState() {
@@ -32,7 +47,16 @@ class _DataDiriScreenState extends State<DataDiriScreen> {
     _loadDataDiriAPI();
   }
 
-  // --- 1. FUNGSI UTAMA MENGAMBIL DATA DARI API ---
+  @override
+  void dispose() {
+    _nameCtrl.dispose(); 
+    _emailCtrl.dispose();
+    _phoneCtrl.dispose();
+    _addressCtrl.dispose();
+    super.dispose();
+  }
+
+  // --- 1. MENGAMBIL DATA DARI API ---
   Future<void> _loadDataDiriAPI() async {
     setState(() => _isLoading = true);
 
@@ -42,67 +66,179 @@ class _DataDiriScreenState extends State<DataDiriScreen> {
 
       if (response['status'] == 'success' || response['success'] == true) {
         final data = response['data'] ?? {};
-        
         if (mounted) {
-          setState(() {
-            _namaLengkap = _checkEmpty(data['nama_lengkap']);
-            _noTelepon = _checkEmpty(data['no_telepon']);
-            _email = _checkEmpty(data['email']);
-            
-            // Format tanggal lahir jika ada
-            String tglLahirRaw = _checkEmpty(data['tanggal_lahir']);
-            _tanggalLahir = _formatDate(tglLahirRaw);
-            
-            _jenisKelamin = _checkEmpty(data['jenis_kelamin']);
-            _alamat = _checkEmpty(data['alamat']);
-            _noPegawai = _checkEmpty(data['no_pegawai']);
-            _gerai = _checkEmpty(data['gerai']);
-            
-            String foto = data['foto_profil']?.toString() ?? "";
-            // Jika foto kosong dari API, buat avatar dengan inisial nama
-            _fotoProfil = foto.isNotEmpty ? foto : "https://ui-avatars.com/api/?name=${Uri.encodeComponent(_namaLengkap != "-" ? _namaLengkap : "Mom N Jo")}&background=ECA898&color=fff";
-            
-            _isLoading = false;
-          });
+          _populateData(data, fromApi: true);
         }
       } else {
-        // Jika API membalas error (misal 404), fallback ke memori lokal
         _loadFallbackData();
       }
     } catch (e) {
-      // Jika internet putus, fallback ke memori lokal
       _loadFallbackData();
     }
   }
 
-  // --- 2. FUNGSI CADANGAN JIKA API GAGAL (AMBIL DARI LOKAL) ---
+  // --- 2. FUNGSI CADANGAN ---
   Future<void> _loadFallbackData() async {
     try {
       SharedPreferences prefs = await SharedPreferences.getInstance();
-
       if (mounted) {
-        setState(() {
-          _namaLengkap = prefs.getString('fullname') ?? prefs.getString('nama_lengkap') ?? "-";
-          _noTelepon = prefs.getString('no_telepon') ?? prefs.getString('phone') ?? "-";
-          _email = prefs.getString('email') ?? "-";
-          _tanggalLahir = prefs.getString('tanggal_lahir') ?? "-";
-          _jenisKelamin = prefs.getString('jenis_kelamin') ?? "-";
-          _alamat = prefs.getString('alamat') ?? "-";
-          _noPegawai = prefs.getString('username') ?? prefs.getString('id_terapis') ?? "-";
-          _gerai = prefs.getString('gerai') ?? prefs.getString('branch') ?? "-";
-          
-          String foto = prefs.getString('foto_profil') ?? "";
-          _fotoProfil = foto.isNotEmpty ? foto : "https://ui-avatars.com/api/?name=${Uri.encodeComponent(_namaLengkap != "-" ? _namaLengkap : "Mom N Jo")}&background=ECA898&color=fff";
-          
-          _isLoading = false;
-        });
+        Map<String, dynamic> localData = {
+          'nama_lengkap': prefs.getString('fullname') ?? prefs.getString('nama_lengkap'),
+          'no_telepon': prefs.getString('no_telepon') ?? prefs.getString('phone'),
+          'email': prefs.getString('email'),
+          'tanggal_lahir': prefs.getString('tanggal_lahir'),
+          'alamat': prefs.getString('alamat'),
+          'no_pegawai': prefs.getString('username') ?? prefs.getString('id_terapis'),
+          'gerai': prefs.getString('gerai') ?? prefs.getString('branch'),
+          'foto_profil': prefs.getString('foto_profil'),
+        };
+        _populateData(localData, fromApi: false);
       }
     } catch (e) {
       if (mounted) setState(() => _isLoading = false);
     }
   }
 
-  // --- HELPER UNTUK CEK STRING KOSONG ---
+  void _populateData(Map<String, dynamic> data, {required bool fromApi}) {
+    setState(() {
+      // Setup Tanggal Lahir
+      String tglLahirServer = _checkEmpty(data['tanggal_lahir']);
+      _tanggalLahirRaw = tglLahirServer != "-" ? tglLahirServer : ""; 
+      _tanggalLahirTampil = _formatDate(tglLahirServer);
+      
+      _noPegawai = _checkEmpty(data['no_pegawai']);
+      _gerai = _checkEmpty(data['gerai']);
+
+      // Isi nilai controller (Data Dinamis)
+      String namaRaw = _checkEmpty(data['nama_lengkap']);
+      _nameCtrl.text = namaRaw;
+      _namaAsliUntukAvatar = namaRaw != "-" ? namaRaw : "Mom N Jo";
+      
+      _emailCtrl.text = _checkEmpty(data['email']);
+      _phoneCtrl.text = _checkEmpty(data['no_telepon']);
+      _addressCtrl.text = _checkEmpty(data['alamat']);
+      
+      String foto = data['foto_profil']?.toString() ?? "";
+      _fotoProfil = foto.isNotEmpty ? foto : "https://ui-avatars.com/api/?name=${Uri.encodeComponent(_namaAsliUntukAvatar)}&background=ECA898&color=fff";
+      
+      _isLoading = false;
+    });
+  }
+
+  // --- 3. FUNGSI UPLOAD GAMBAR ---
+  Future<void> _pickImage() async {
+    if (!_isEditing) return; 
+    try {
+      final XFile? pickedFile = await _picker.pickImage(
+        source: ImageSource.gallery,
+        imageQuality: 70, 
+      );
+      if (pickedFile != null) {
+        setState(() {
+          // PERUBAHAN 2: Langsung simpan XFile-nya, jangan di convert ke File dart:io
+          _selectedImage = pickedFile;
+        });
+      }
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Gagal membuka galeri.')),
+      );
+    }
+  }
+
+  // --- FUNGSI PILIH TANGGAL LAHIR (DATE PICKER) ---
+  Future<void> _pickDate() async {
+    if (!_isEditing) return; 
+
+    DateTime initialDate = DateTime.now();
+    if (_tanggalLahirRaw.isNotEmpty && _tanggalLahirRaw != "-") {
+      try {
+        initialDate = DateTime.parse(_tanggalLahirRaw);
+      } catch (e) {
+        initialDate = DateTime.now();
+      }
+    }
+
+    final DateTime? pickedDate = await showDatePicker(
+      context: context,
+      initialDate: initialDate,
+      firstDate: DateTime(1950), 
+      lastDate: DateTime.now(),  
+      builder: (context, child) {
+        return Theme(
+          data: Theme.of(context).copyWith(
+            colorScheme: ColorScheme.light(
+              primary: textDarkBrown, 
+              onPrimary: Colors.white,
+              onSurface: textDarkBrown,
+            ),
+          ),
+          child: child!,
+        );
+      },
+    );
+
+    if (pickedDate != null) {
+      setState(() {
+        _tanggalLahirRaw = DateFormat('yyyy-MM-dd').format(pickedDate);
+        _tanggalLahirTampil = DateFormat('dd MMMM yyyy').format(pickedDate);
+      });
+    }
+  }
+
+  // --- 4. FUNGSI SIMPAN PERUBAHAN ---
+  Future<void> _saveChanges() async {
+    setState(() => _isSaving = true);
+
+    try {
+      final api = ApiService();
+      final response = await api.updateDataDiri(
+        namaLengkap: _nameCtrl.text.trim(), 
+        tanggalLahir: _tanggalLahirRaw, 
+        email: _emailCtrl.text.trim(),
+        noTelepon: _phoneCtrl.text.trim(),
+        alamat: _addressCtrl.text.trim(),
+        // PERUBAHAN 3: Disesuaikan dengan parameter di api_service.dart milikmu
+        // Kirim _selectedImage?.path. Di Web ini akan berisi URL 'blob:http://...' yang nanti difetch di api_service
+        imagePath: _selectedImage?.path, 
+      );
+
+      if (mounted) {
+        if (response['success'] == true) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Data berhasil diperbarui!', style: TextStyle(color: Colors.white)), backgroundColor: Colors.green),
+          );
+          
+          SharedPreferences prefs = await SharedPreferences.getInstance();
+          await prefs.setString('fullname', _nameCtrl.text.trim());
+          await prefs.setString('nama_lengkap', _nameCtrl.text.trim());
+          await prefs.setString('tanggal_lahir', _tanggalLahirRaw);
+          
+          setState(() {
+            _isEditing = false;
+            _tanggalLahirTampil = DateFormat('dd MMMM yyyy').format(DateTime.parse(_tanggalLahirRaw));
+            _selectedImage = null; 
+          });
+          
+          _loadDataDiriAPI(); 
+        } else {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text(response['message'] ?? 'Gagal menyimpan data'), backgroundColor: Colors.red),
+          );
+        }
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _isSaving = false);
+    }
+  }
+
+  // --- HELPER ---
   String _checkEmpty(dynamic value) {
     if (value == null) return "-";
     String valStr = value.toString().trim();
@@ -110,7 +246,6 @@ class _DataDiriScreenState extends State<DataDiriScreen> {
     return valStr;
   }
 
-  // --- HELPER UNTUK FORMAT TANGGAL ---
   String _formatDate(String dateStr) {
     if (dateStr == "-") return "-";
     try {
@@ -131,7 +266,7 @@ class _DataDiriScreenState extends State<DataDiriScreen> {
         ),
       ),
       child: Scaffold(
-        backgroundColor: Colors.transparent, // Transparan agar gambar terlihat
+        backgroundColor: Colors.transparent,
         appBar: AppBar(
           backgroundColor: Colors.transparent,
           elevation: 0,
@@ -148,11 +283,26 @@ class _DataDiriScreenState extends State<DataDiriScreen> {
             ),
           ),
           centerTitle: true,
+          actions: [
+            if (!_isLoading)
+              IconButton(
+                icon: Icon(
+                  _isEditing ? Icons.close : Icons.edit,
+                  color: _isEditing ? Colors.red : textDarkBrown,
+                ),
+                onPressed: () {
+                  setState(() {
+                    _isEditing = !_isEditing;
+                    if (!_isEditing) _selectedImage = null; 
+                  });
+                },
+              )
+          ],
         ),
         body: _isLoading
             ? const Center(child: CircularProgressIndicator()) 
             : RefreshIndicator(
-                onRefresh: _loadDataDiriAPI, // Tarik ke bawah untuk refresh dari API
+                onRefresh: _loadDataDiriAPI,
                 color: primaryPeach,
                 child: SingleChildScrollView(
                   physics: const AlwaysScrollableScrollPhysics(),
@@ -166,12 +316,12 @@ class _DataDiriScreenState extends State<DataDiriScreen> {
                       _buildInfoSection(
                         title: 'Informasi Pribadi',
                         items: [
-                          _buildInfoItem(Icons.person_outline, 'Nama Lengkap', _namaLengkap),
-                          _buildInfoItem(Icons.phone_outlined, 'Nomor Telepon', _noTelepon),
-                          _buildInfoItem(Icons.email_outlined, 'Email', _email),
-                          _buildInfoItem(Icons.calendar_today_outlined, 'Tanggal Lahir', _tanggalLahir),
-                          _buildInfoItem(Icons.female_outlined, 'Jenis Kelamin', _jenisKelamin),
-                          _buildInfoItem(Icons.location_on_outlined, 'Alamat', _alamat),
+                          _buildEditableItem(Icons.person_outline, 'Nama Lengkap', _nameCtrl, TextInputType.name),
+                          _buildDatePickerItem(Icons.calendar_today_outlined, 'Tanggal Lahir', _tanggalLahirTampil),
+                          
+                          _buildEditableItem(Icons.phone_outlined, 'Nomor Telepon', _phoneCtrl, TextInputType.phone),
+                          _buildEditableItem(Icons.email_outlined, 'Email', _emailCtrl, TextInputType.emailAddress),
+                          _buildEditableItem(Icons.location_on_outlined, 'Alamat', _addressCtrl, TextInputType.multiline),
                         ],
                       ),
                       const SizedBox(height: 16),
@@ -180,8 +330,8 @@ class _DataDiriScreenState extends State<DataDiriScreen> {
                       _buildInfoSection(
                         title: 'Informasi Pekerjaan',
                         items: [
-                          _buildInfoItem(Icons.badge_outlined, 'No.Pegawai', _noPegawai),
-                          _buildInfoItem(Icons.map_outlined, 'Gerai / Area', _gerai),
+                          _buildStaticItem(Icons.badge_outlined, 'No.Pegawai', _noPegawai),
+                          _buildStaticItem(Icons.map_outlined, 'Gerai / Area', _gerai),
                         ],
                       ),
                       const SizedBox(height: 40),
@@ -189,53 +339,65 @@ class _DataDiriScreenState extends State<DataDiriScreen> {
                   ),
                 ),
               ),
+        bottomNavigationBar: _isEditing ? _buildSaveButton() : null,
       ),
     );
   }
 
-  // Komponen Foto Profil + Ikon Kamera
+  // --- KUMPULAN WIDGET HELPER ---
   Widget _buildProfilePicture() {
     return Center(
       child: Stack(
         children: [
-          Container(
-            padding: const EdgeInsets.all(4),
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              color: Colors.white,
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withOpacity(0.08),
-                  blurRadius: 10,
-                  offset: const Offset(0, 4),
-                ),
-              ],
-            ),
-            child: CircleAvatar(
-              radius: 50,
-              backgroundColor: Colors.grey.shade200,
-              backgroundImage: NetworkImage(_fotoProfil), 
-            ),
-          ),
-          Positioned(
-            bottom: 0,
-            right: 0,
+          GestureDetector(
+            onTap: _pickImage,
             child: Container(
-              padding: const EdgeInsets.all(8),
+              padding: const EdgeInsets.all(4),
               decoration: BoxDecoration(
-                color: primaryPeach,
                 shape: BoxShape.circle,
-                border: Border.all(color: Colors.white, width: 2),
+                color: Colors.white,
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withOpacity(0.08),
+                    blurRadius: 10,
+                    offset: const Offset(0, 4),
+                  ),
+                ],
               ),
-              child: const Icon(Icons.camera_alt, color: Colors.white, size: 16),
+              child: CircleAvatar(
+                radius: 50,
+                backgroundColor: Colors.grey.shade200,
+                // PERUBAHAN 4: Penanganan gambar cross-platform (Web dan Mobile)
+                backgroundImage: _selectedImage != null 
+                    ? (kIsWeb 
+                        ? NetworkImage(_selectedImage!.path) 
+                        : FileImage(File(_selectedImage!.path))) as ImageProvider
+                    : NetworkImage(_fotoProfil), 
+              ),
             ),
           ),
+          if (_isEditing)
+            Positioned(
+              bottom: 0,
+              right: 0,
+              child: GestureDetector(
+                onTap: _pickImage,
+                child: Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: primaryPeach,
+                    shape: BoxShape.circle,
+                    border: Border.all(color: Colors.white, width: 2),
+                  ),
+                  child: const Icon(Icons.camera_alt, color: Colors.white, size: 16),
+                ),
+              ),
+            ),
         ],
       ),
     );
   }
 
-  // Komponen Card Pembungkus List Informasi
   Widget _buildInfoSection({required String title, required List<Widget> items}) {
     return Container(
       decoration: BoxDecoration(
@@ -271,8 +433,54 @@ class _DataDiriScreenState extends State<DataDiriScreen> {
     );
   }
 
-  // Komponen Baris Informasi (Icon + Label + Value)
-  Widget _buildInfoItem(IconData icon, String label, String value) {
+  Widget _buildDatePickerItem(IconData icon, String label, String value) {
+    return InkWell(
+      onTap: _isEditing ? _pickDate : null,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Icon(icon, size: 20, color: _isEditing ? primaryPeach : Colors.grey.shade400),
+            const SizedBox(width: 16),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    label,
+                    style: TextStyle(
+                      fontSize: 12, 
+                      color: _isEditing ? primaryPeach : Colors.grey.shade500, 
+                      fontWeight: FontWeight.w500
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text(
+                        value,
+                        style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: textDarkBrown),
+                      ),
+                      if (_isEditing)
+                        Icon(Icons.edit_calendar, size: 16, color: Colors.grey.shade400),
+                    ],
+                  ),
+                  if (_isEditing) ...[
+                    const SizedBox(height: 4),
+                    Divider(height: 1, color: primaryPeach, thickness: 2), 
+                  ]
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildStaticItem(IconData icon, String label, String value) {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
       child: Row(
@@ -297,6 +505,84 @@ class _DataDiriScreenState extends State<DataDiriScreen> {
             ),
           ),
         ],
+      ),
+    );
+  }
+
+  Widget _buildEditableItem(IconData icon, String label, TextEditingController controller, TextInputType type) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(icon, size: 20, color: _isEditing ? primaryPeach : Colors.grey.shade400),
+          const SizedBox(width: 16),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  label,
+                  style: TextStyle(
+                    fontSize: 12, 
+                    color: _isEditing ? primaryPeach : Colors.grey.shade500, 
+                    fontWeight: FontWeight.w500
+                  ),
+                ),
+                const SizedBox(height: 4),
+                if (!_isEditing)
+                  Text(
+                    controller.text.isEmpty ? "-" : controller.text,
+                    style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: textDarkBrown),
+                  )
+                else
+                  TextFormField(
+                    controller: controller,
+                    keyboardType: type,
+                    maxLines: type == TextInputType.multiline ? null : 1,
+                    style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: textDarkBrown),
+                    decoration: InputDecoration(
+                      isDense: true,
+                      contentPadding: const EdgeInsets.symmetric(vertical: 8, horizontal: 0),
+                      border: UnderlineInputBorder(borderSide: BorderSide(color: Colors.grey.shade300)),
+                      enabledBorder: UnderlineInputBorder(borderSide: BorderSide(color: Colors.grey.shade300)),
+                      focusedBorder: UnderlineInputBorder(borderSide: BorderSide(color: primaryPeach, width: 2)),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSaveButton() {
+    return Container(
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        boxShadow: [
+          BoxShadow(color: Colors.black.withOpacity(0.05), offset: const Offset(0, -4), blurRadius: 10),
+        ],
+      ),
+      child: ElevatedButton(
+        onPressed: _isSaving ? null : _saveChanges,
+        style: ElevatedButton.styleFrom(
+          backgroundColor: textDarkBrown,
+          padding: const EdgeInsets.symmetric(vertical: 16),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        ),
+        child: _isSaving
+            ? const SizedBox(
+                height: 20,
+                width: 20,
+                child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2),
+              )
+            : const Text(
+                'Simpan Perubahan',
+                style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.white),
+              ),
       ),
     );
   }
