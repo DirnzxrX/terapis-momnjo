@@ -67,4 +67,10 @@
 		<string>UIInterfaceOrientationLandscapeRight</string>
 	</array>
 </dict>
+<!-- TAMBAHAN IZIN UNTUK MENGAKSES URL HTTP BIASA (CLEARTEXT) -->
+<key>NSAppTransportSecurity</key>
+<dict>
+    <key>NSAllowsArbitraryLoads</key>
+    <true/>
+</dict>
 </plist>

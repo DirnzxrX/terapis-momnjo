@@ -89,12 +89,13 @@ class _HomeScreenState extends State<HomeScreen> {
         namaTampil = usernameSimpanan; 
       }
       
-      // --- PERBAIKAN: Load Foto dari Cache dengan baseImageUrl ---
+      // 🔥 SABUK PENGAMAN 1: Load Foto dari Cache dengan Anti Mixed-Content
       String? fotoSimpanan = prefs.getString('foto_profil') ?? prefs.getString('foto'); 
       if (fotoSimpanan != null && fotoSimpanan.isNotEmpty && fotoSimpanan != "null" && fotoSimpanan != "-") {
          if (!fotoSimpanan.startsWith('http')) {
            fotoSimpanan = "${ApiService.baseImageUrl}/$fotoSimpanan";
          }
+         fotoSimpanan = fotoSimpanan.replaceFirst('http://', 'https://'); // Paksa HTTPS
       }
 
       final api = ApiService();
@@ -200,13 +201,16 @@ class _HomeScreenState extends State<HomeScreen> {
           }
         }
 
+        // 🔥 SABUK PENGAMAN 2: Tangkal Mixed Content API Profil
         if (rawFoto.isNotEmpty && rawFoto != "null" && rawFoto != "-") {
            String remoteFoto = "";
-           if (rawFoto.startsWith('http')) {
-             remoteFoto = rawFoto;
-           } else {
+           if (!rawFoto.startsWith('http')) {
              remoteFoto = "${ApiService.baseImageUrl}/$rawFoto"; 
+           } else {
+             remoteFoto = rawFoto;
            }
+           remoteFoto = remoteFoto.replaceFirst('http://', 'https://'); // Paksa HTTPS
+           
            // Tambahkan Timestamp agar cache memuat ulang gambar baru
            fotoSimpanan = "$remoteFoto?v=${DateTime.now().millisecondsSinceEpoch}";
            await prefs.setString('foto_profil', rawFoto);
@@ -250,7 +254,8 @@ class _HomeScreenState extends State<HomeScreen> {
         
         for (var item in dataList) {
           if (item is String) {
-            loadedImages.add(item);
+            // 🔥 SABUK PENGAMAN 3A: Carousel Array of String
+            loadedImages.add(item.replaceFirst('http://', 'https://'));
           } else if (item is Map) {
             String? url = item['image'] ?? item['image_url'] ?? item['banner'] ?? item['file'] ?? item['url'] ?? item['foto'] ?? item['gambar'] ?? item['path'];
             
@@ -267,12 +272,13 @@ class _HomeScreenState extends State<HomeScreen> {
             }
 
             if (url != null && url.trim().isNotEmpty) {
-              // 🔥 PERBAIKAN: Menggunakan baseImageUrl jika bukan link eksternal
               if (!url.startsWith('http')) {
                 // Hapus awalan '/' atau 'assets/images/' jika terbawa dari backend
                 url = url.replaceAll('assets/images/', '').replaceFirst(RegExp(r'^/'), '');
                 url = '${ApiService.baseImageUrl}/$url'; 
               }
+              // 🔥 SABUK PENGAMAN 3B: Carousel Array of Object
+              url = url.replaceFirst('http://', 'https://'); // Paksa HTTPS
               loadedImages.add(url);
             }
           }
@@ -580,7 +586,7 @@ class _HomeScreenState extends State<HomeScreen> {
           backgroundColor: Colors.grey.shade200,
           // --- PENANGANAN ERROR JIKA FOTO SERVER 404 ---
           onBackgroundImageError: (exception, stackTrace) {
-             if (_fotoProfile.isNotEmpty) {
+             if (_fotoProfile.isNotEmpty && !_fotoProfile.contains('ui-avatars')) {
                WidgetsBinding.instance.addPostFrameCallback((_) {
                  if (mounted) {
                    setState(() {
@@ -590,7 +596,7 @@ class _HomeScreenState extends State<HomeScreen> {
                });
              }
           },
-          backgroundImage: _fotoProfile.isNotEmpty && _fotoProfile.startsWith('http')
+          backgroundImage: _fotoProfile.isNotEmpty && _fotoProfile.startsWith('https')
               ? NetworkImage(_fotoProfile)
               : NetworkImage('https://ui-avatars.com/api/?name=${Uri.encodeComponent(_namaTerapis)}&background=ECA898&color=fff') as ImageProvider, 
         ),

@@ -15,7 +15,7 @@ class ProfileScreen extends StatefulWidget {
 class _ProfileScreenState extends State<ProfileScreen> {
   final Color primaryPink = const Color(0xFFE8647C); 
   
-  // 🔥 PRAKTIK TERBAIK: Menggunakan URL global dari ApiService
+  // URL global dari ApiService
   final String baseImageUrl = ApiService.baseImageUrl;
 
   // --- STATE VARIABLE UNTUK DATA DINAMIS ---
@@ -51,12 +51,13 @@ class _ProfileScreenState extends State<ProfileScreen> {
       String id = prefs.getString('username') ?? prefs.getString('id_terapis') ?? 'TRP-000';
       String branch = prefs.getString('gerai') ?? prefs.getString('branch') ?? '-'; 
       
-      // Load Foto dari Cache (Tambahkan base url jika cuma nama file)
+      // 🔥 SABUK PENGAMAN 1: Load Foto dari Cache dengan Anti Mixed-Content
       String cachedFoto = prefs.getString('foto_profil') ?? '';
       if (cachedFoto.isNotEmpty && cachedFoto != "null" && cachedFoto != "-") {
          if (!cachedFoto.startsWith('http')) {
            cachedFoto = "$baseImageUrl/$cachedFoto";
          }
+         cachedFoto = cachedFoto.replaceFirst('http://', 'https://'); // Paksa HTTPS
       }
 
       if (mounted) {
@@ -145,20 +146,22 @@ class _ProfileScreenState extends State<ProfileScreen> {
             }
           }
 
-          // --- PROSES KOMPILASI FOTO (Mencegah Cache Nyangkut) ---
+          // 🔥 SABUK PENGAMAN 2: PROSES KOMPILASI FOTO DARI SERVER ---
           String remoteFoto = "";
           if (rawFoto.isNotEmpty && rawFoto != "null" && rawFoto != "-") {
-             if (rawFoto.startsWith('http')) {
-               remoteFoto = rawFoto;
-             } else {
+             if (!rawFoto.startsWith('http')) {
                remoteFoto = "$baseImageUrl/$rawFoto"; 
+             } else {
+               remoteFoto = rawFoto;
              }
+             // Tangkal Mixed Content dari server
+             remoteFoto = remoteFoto.replaceFirst('http://', 'https://');
           }
 
           if (remoteFoto.isNotEmpty) {
-            // Bypass cache dengan millis timestamp
+            // Bypass cache dengan millis timestamp agar perbaruan foto langsung terlihat
             _avatarUrl = "$remoteFoto?v=${DateTime.now().millisecondsSinceEpoch}";
-            prefs.setString('foto_profil', rawFoto); // Simpan hanya nama filenya ke cache
+            prefs.setString('foto_profil', rawFoto); // Simpan nama filenya ke cache
           }
 
           // Bersihkan text jika gerai tetap gagal diload
@@ -295,15 +298,13 @@ class _ProfileScreenState extends State<ProfileScreen> {
             child: CircleAvatar(
               radius: 36,
               backgroundColor: Colors.grey.shade200,
-              // Penanganan error jika gambar 404/rusak di server
+              // Fallback gambar jika error 404 dari server
               onBackgroundImageError: (exception, stackTrace) {
-                 debugPrint("Gagal memuat gambar avatar: $exception");
-                 // Gunakan addPostFrameCallback agar tidak tabrakan dengan proses build layar
-                 if (_avatarUrl.isNotEmpty) {
+                 if (_avatarUrl.isNotEmpty && !_avatarUrl.contains('ui-avatars')) {
                    WidgetsBinding.instance.addPostFrameCallback((_) {
                      if (mounted) {
                        setState(() {
-                         _avatarUrl = ""; // Kembalikan ke foto inisial (fallback)
+                         _avatarUrl = ""; // Kembalikan ke foto inisial
                        });
                      }
                    });
@@ -458,7 +459,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
               context,
               MaterialPageRoute(builder: (context) => const SettingsScreen()),
             ).then((_) {
-              // Refresh otomatis jika gambar diubah di layar Settings (meskipun diarahkan ke Data Diri jg)
+              // Refresh otomatis jika gambar diubah di layar Settings
               _loadProfileData(); 
             });
           }),

@@ -49,10 +49,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
                      prefs.getString('username') ?? 
                      prefs.getString('id_terapis') ?? '';
         
-        // --- PERBAIKAN: Cek cache foto lokal dan tambahkan baseImageUrl jika perlu ---
+        // --- PERBAIKAN: Cek cache foto lokal dengan anti Mixed-Content ---
         String localFoto = prefs.getString('foto_profil') ?? '';
         if (localFoto.isNotEmpty && localFoto != "null" && localFoto != "-") {
-           if (!localFoto.startsWith('http')) {
+           if (localFoto.startsWith('http')) {
+             localFoto = localFoto.replaceFirst('http://', 'https://'); // Tangkal Mixed Content dari cache
+           } else {
              localFoto = "${ApiService.baseImageUrl}/$localFoto";
            }
         }
@@ -71,14 +73,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
         // DataDiriScreen menggunakan no_pegawai
         String remoteId = data['no_pegawai'] ?? data['id_terapis'] ?? data['username'] ?? data['id']?.toString() ?? _idTerapis;
         
-        // --- LOGIKA PERBAIKAN FOTO PROFIL ---
+        // --- LOGIKA PERBAIKAN FOTO PROFIL (Anti Mixed-Content & Missing Base URL) ---
         String rawFoto = data['foto_profil']?.toString() ?? data['foto']?.toString() ?? data['image']?.toString() ?? "";
         String remoteFoto = "";
         
         if (rawFoto.isNotEmpty && rawFoto != "null" && rawFoto != "-") {
            // Cek apakah server mengembalikan full URL (http...) atau hanya nama file
            if (rawFoto.startsWith('http')) {
-             remoteFoto = rawFoto;
+             remoteFoto = rawFoto.replaceFirst('http://', 'https://'); // Tangkal Mixed Content
            } else {
              // Jika hanya nama file, gabungkan dengan baseImageUrl dari ApiService
              remoteFoto = "${ApiService.baseImageUrl}/$rawFoto"; 

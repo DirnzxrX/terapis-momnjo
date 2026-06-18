@@ -1,5 +1,5 @@
 import 'dart:io';
-import 'package:flutter/foundation.dart' show kIsWeb; // Tambahkan ini untuk mengecek Web/Mobile
+import 'package:flutter/foundation.dart' show kIsWeb; // Mengecek apakah jalan di Web
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:therapist_momnjo/data/api_service.dart';
@@ -21,7 +21,7 @@ class _DataDiriScreenState extends State<DataDiriScreen> {
   bool _isEditing = false;
   bool _isSaving = false;
 
-  // Variabel Data Statis (Tidak bisa diubah)
+  // Variabel Data Statis (Tidak bisa diubah dari HP)
   String _noPegawai = "-";
   String _gerai = "-";
   String _fotoProfil = "";
@@ -37,7 +37,7 @@ class _DataDiriScreenState extends State<DataDiriScreen> {
   final TextEditingController _phoneCtrl = TextEditingController();
   final TextEditingController _addressCtrl = TextEditingController();
   
-  // PERUBAHAN 1: Gunakan XFile, bukan File dari dart:io
+  // Gunakan XFile agar support di Web maupun Android/iOS
   XFile? _selectedImage;
   final ImagePicker _picker = ImagePicker();
 
@@ -99,6 +99,7 @@ class _DataDiriScreenState extends State<DataDiriScreen> {
     }
   }
 
+  // --- FUNGSI UTAMA MEMASUKKAN DATA KE UI ---
   void _populateData(Map<String, dynamic> data, {required bool fromApi}) {
     setState(() {
       // Setup Tanggal Lahir
@@ -118,14 +119,31 @@ class _DataDiriScreenState extends State<DataDiriScreen> {
       _phoneCtrl.text = _checkEmpty(data['no_telepon']);
       _addressCtrl.text = _checkEmpty(data['alamat']);
       
-      String foto = data['foto_profil']?.toString() ?? "";
-      _fotoProfil = foto.isNotEmpty ? foto : "https://ui-avatars.com/api/?name=${Uri.encodeComponent(_namaAsliUntukAvatar)}&background=ECA898&color=fff";
+      // 🔥 SABUK PENGAMAN URL FOTO (Anti Mixed-Content & Missing Base URL)
+      String foto = data['foto_profil']?.toString() ?? data['foto']?.toString() ?? data['image']?.toString() ?? "";
+      String compiledFotoUrl = "";
+      
+      if (foto.isNotEmpty && foto != "null" && foto != "-") {
+        if (foto.startsWith('http')) {
+          // Tangkal Mixed Content: paksa http jadi https
+          compiledFotoUrl = foto.replaceFirst('http://', 'https://'); 
+        } else {
+          // Tangkal nama file mentah: gabungkan dengan Base URL
+          compiledFotoUrl = "${ApiService.baseImageUrl}/$foto"; 
+        }
+        // Bypass cache browser agar jika foto diupdate, perubahannya langsung terlihat (tidak nyangkut)
+        compiledFotoUrl = "$compiledFotoUrl?v=${DateTime.now().millisecondsSinceEpoch}";
+      }
+
+      _fotoProfil = compiledFotoUrl.isNotEmpty 
+          ? compiledFotoUrl 
+          : "https://ui-avatars.com/api/?name=${Uri.encodeComponent(_namaAsliUntukAvatar)}&background=ECA898&color=fff";
       
       _isLoading = false;
     });
   }
 
-  // --- 3. FUNGSI UPLOAD GAMBAR ---
+  // --- 3. FUNGSI PILIH GAMBAR DARI GALERI ---
   Future<void> _pickImage() async {
     if (!_isEditing) return; 
     try {
@@ -135,7 +153,6 @@ class _DataDiriScreenState extends State<DataDiriScreen> {
       );
       if (pickedFile != null) {
         setState(() {
-          // PERUBAHAN 2: Langsung simpan XFile-nya, jangan di convert ke File dart:io
           _selectedImage = pickedFile;
         });
       }
@@ -186,7 +203,7 @@ class _DataDiriScreenState extends State<DataDiriScreen> {
     }
   }
 
-  // --- 4. FUNGSI SIMPAN PERUBAHAN ---
+  // --- 4. FUNGSI SIMPAN PERUBAHAN KE API ---
   Future<void> _saveChanges() async {
     setState(() => _isSaving = true);
 
@@ -198,9 +215,7 @@ class _DataDiriScreenState extends State<DataDiriScreen> {
         email: _emailCtrl.text.trim(),
         noTelepon: _phoneCtrl.text.trim(),
         alamat: _addressCtrl.text.trim(),
-        // PERUBAHAN 3: Disesuaikan dengan parameter di api_service.dart milikmu
-        // Kirim _selectedImage?.path. Di Web ini akan berisi URL 'blob:http://...' yang nanti difetch di api_service
-        imagePath: _selectedImage?.path, 
+        imagePath: _selectedImage?.path, // Path bisa dibaca oleh Web maupun Mobile di ApiService
       );
 
       if (mounted) {
@@ -220,6 +235,7 @@ class _DataDiriScreenState extends State<DataDiriScreen> {
             _selectedImage = null; 
           });
           
+          // Refresh data untuk memastikan data yang ditampilkan adalah data terbaru dari server
           _loadDataDiriAPI(); 
         } else {
           ScaffoldMessenger.of(context).showSnackBar(
@@ -230,7 +246,7 @@ class _DataDiriScreenState extends State<DataDiriScreen> {
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red),
+          SnackBar(content: Text('Error jaringan: $e'), backgroundColor: Colors.red),
         );
       }
     } finally {
@@ -238,7 +254,7 @@ class _DataDiriScreenState extends State<DataDiriScreen> {
     }
   }
 
-  // --- HELPER ---
+  // --- HELPER FORMATTING ---
   String _checkEmpty(dynamic value) {
     if (value == null) return "-";
     String valStr = value.toString().trim();
@@ -293,6 +309,7 @@ class _DataDiriScreenState extends State<DataDiriScreen> {
                 onPressed: () {
                   setState(() {
                     _isEditing = !_isEditing;
+                    // Reset foto yang dipilih jika batal edit
                     if (!_isEditing) _selectedImage = null; 
                   });
                 },
@@ -300,7 +317,7 @@ class _DataDiriScreenState extends State<DataDiriScreen> {
           ],
         ),
         body: _isLoading
-            ? const Center(child: CircularProgressIndicator()) 
+            ? const Center(child: CircularProgressIndicator(color: Color(0xFFECA898))) 
             : RefreshIndicator(
                 onRefresh: _loadDataDiriAPI,
                 color: primaryPeach,
@@ -318,7 +335,6 @@ class _DataDiriScreenState extends State<DataDiriScreen> {
                         items: [
                           _buildEditableItem(Icons.person_outline, 'Nama Lengkap', _nameCtrl, TextInputType.name),
                           _buildDatePickerItem(Icons.calendar_today_outlined, 'Tanggal Lahir', _tanggalLahirTampil),
-                          
                           _buildEditableItem(Icons.phone_outlined, 'Nomor Telepon', _phoneCtrl, TextInputType.phone),
                           _buildEditableItem(Icons.email_outlined, 'Email', _emailCtrl, TextInputType.emailAddress),
                           _buildEditableItem(Icons.location_on_outlined, 'Alamat', _addressCtrl, TextInputType.multiline),
@@ -367,7 +383,17 @@ class _DataDiriScreenState extends State<DataDiriScreen> {
               child: CircleAvatar(
                 radius: 50,
                 backgroundColor: Colors.grey.shade200,
-                // PERUBAHAN 4: Penanganan gambar cross-platform (Web dan Mobile)
+                // 🔥 Penanganan Error Gambar jika link rusak / 404 dari Server
+                onBackgroundImageError: (exception, stackTrace) {
+                  if (mounted && _fotoProfil.isNotEmpty && !_fotoProfil.contains('ui-avatars')) {
+                    WidgetsBinding.instance.addPostFrameCallback((_) {
+                      setState(() {
+                        _fotoProfil = "https://ui-avatars.com/api/?name=${Uri.encodeComponent(_namaAsliUntukAvatar)}&background=ECA898&color=fff";
+                      });
+                    });
+                  }
+                },
+                // Logika Tampilan: Tampilkan gambar lokal (jika ada yg dipilih) ATAU gambar dari server
                 backgroundImage: _selectedImage != null 
                     ? (kIsWeb 
                         ? NetworkImage(_selectedImage!.path) 
