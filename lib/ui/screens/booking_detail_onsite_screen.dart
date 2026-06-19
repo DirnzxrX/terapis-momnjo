@@ -73,20 +73,42 @@ class _DetailBookingOnsiteScreenState extends State<DetailBookingOnsiteScreen> {
     if (mounted) {
       setState(() { _isUpdatingStatus = false; });
       if (response['success'] == true || response['status'] == 'success') {
+        final responseStatus = response['data'] is Map
+            ? response['data']['status']?.toString()
+            : response['booking_status']?.toString();
         setState(() {
-          _currentStatus = newStatus;
-          _data?['booking_status'] = newStatus; 
+          _currentStatus = (responseStatus != null && responseStatus.isNotEmpty) ? responseStatus : newStatus;
+          _data?['booking_status'] = _currentStatus; 
         });
+        await _refreshJobDetailFromServer();
       } else {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text(response['message'] ?? 'Gagal update status server')),
         );
-        setState(() {
-          _currentStatus = newStatus;
-          _data?['booking_status'] = newStatus; 
-        });
       }
     }
+  }
+
+  Future<void> _refreshJobDetailFromServer() async {
+    final idTransaksi = _data?['id_transaksi']?.toString() ?? '';
+    if (idTransaksi.isEmpty) return;
+
+    final response = await ApiService().getJobDetail(idTransaksi);
+    if (!mounted || response['success'] != true) return;
+
+    setState(() {
+      final bookingStatus = response['booking_status']?.toString();
+      if (bookingStatus != null && bookingStatus.isNotEmpty) {
+        _currentStatus = bookingStatus;
+        _data?['booking_status'] = bookingStatus;
+      }
+      if (response['data'] != null && response['data'] is List) {
+        _data?['treatments'] = response['data'];
+      }
+      _data?['address'] = response['address'];
+      _data?['coordinate_address'] = response['coordinate_address'];
+      _data?['catatan_alamat'] = response['catatan_alamat'];
+    });
   }
 
   Future<void> _openActiveJob() async {
@@ -111,8 +133,6 @@ class _DetailBookingOnsiteScreenState extends State<DetailBookingOnsiteScreen> {
              _isPemeriksaanSkipped = false; 
           }
           
-          _currentStatus = 'Closed'; 
-          _data?['booking_status'] = 'Closed';
           _data?['durasi_aktual'] = resultMap['durasi_aktual'];
           _savedActiveJobState = {
             'secondsElapsed': resultMap['durasi_aktual'],
@@ -121,6 +141,7 @@ class _DetailBookingOnsiteScreenState extends State<DetailBookingOnsiteScreen> {
             'stepsDone': resultMap['stepsDone'] ?? [true, true, true, true, true],
           };
         });
+        await _refreshJobDetailFromServer();
       } else if (resultMap['action'] == 'save_state') {
         setState(() {
           // 🔥 UPDATE: Jika user melakukan Resume dan mengisi form lalu back (Pause), hilangkan silang merahnya
@@ -130,6 +151,7 @@ class _DetailBookingOnsiteScreenState extends State<DetailBookingOnsiteScreen> {
           _currentStatus = 'Started';
           _savedActiveJobState = resultMap;
         });
+        await _refreshJobDetailFromServer();
       }
     }
   }

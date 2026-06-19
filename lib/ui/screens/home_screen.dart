@@ -81,7 +81,8 @@ class _HomeScreenState extends State<HomeScreen> {
       String? usernameSimpanan = prefs.getString('username');
       String namaTampil = 'Terapis'; 
       
-      bool isOnDutySimpanan = prefs.getBool('is_on_duty') ?? false;
+      // 🚀 PERUBAHAN: Status duty lokal dihapus
+      // bool isOnDutySimpanan = prefs.getBool('is_on_duty') ?? false;
 
       if (namaSimpanan != null && namaSimpanan.trim().isNotEmpty) {
         namaTampil = namaSimpanan;
@@ -89,7 +90,7 @@ class _HomeScreenState extends State<HomeScreen> {
         namaTampil = usernameSimpanan; 
       }
       
-      // 🔥 SABUK PENGAMAN 1: Load Foto dari Cache dengan Anti Mixed-Content
+      // 🛡️ SABUK PENGAMAN 1: Load Foto dari Cache dengan Anti Mixed-Content
       String? fotoSimpanan = prefs.getString('foto_profil') ?? prefs.getString('foto'); 
       if (fotoSimpanan != null && fotoSimpanan.isNotEmpty && fotoSimpanan != "null" && fotoSimpanan != "-") {
          if (!fotoSimpanan.startsWith('http')) {
@@ -201,7 +202,7 @@ class _HomeScreenState extends State<HomeScreen> {
           }
         }
 
-        // 🔥 SABUK PENGAMAN 2: Tangkal Mixed Content API Profil
+        // 🛡️ SABUK PENGAMAN 2: Tangkal Mixed Content API Profil
         if (rawFoto.isNotEmpty && rawFoto != "null" && rawFoto != "-") {
            String remoteFoto = "";
            if (!rawFoto.startsWith('http')) {
@@ -217,11 +218,37 @@ class _HomeScreenState extends State<HomeScreen> {
         }
       } catch (e) {}
 
+      // 🚀 4. PERBAIKAN: FETCH STATUS ABSENSI DARI SERVER (Single Source of Truth)
+      bool currentDutyStatus = false;
+      try {
+        final attendanceResponse = await api.getAttendanceHistory();
+        if (attendanceResponse['success'] == true && attendanceResponse['data'] != null) {
+          final dataMap = attendanceResponse['data'] as Map<String, dynamic>;
+          final List<dynamic> rawData = dataMap['history'] ?? [];
+          
+          if (rawData.isNotEmpty) {
+            final latestRecord = rawData.first as Map<String, dynamic>;
+            final checkInMap = latestRecord['check_in'] as Map<String, dynamic>?;
+            final checkOutMap = latestRecord['check_out'] as Map<String, dynamic>?;
+            
+            bool hasCheckIn = checkInMap != null && checkInMap['waktu'] != null;
+            bool hasCheckOut = checkOutMap != null && checkOutMap['waktu'] != null;
+            
+            // Jika ada check_in tapi belum check_out, berarti On Duty
+            if (hasCheckIn && !hasCheckOut) {
+              currentDutyStatus = true;
+            }
+          }
+        }
+      } catch (e) {
+        debugPrint("Gagal mengambil status absensi: $e");
+      }
+
       if (mounted) {
         setState(() {
           _namaTerapis = namaTampil;
           _fotoProfile = fotoSimpanan ?? '';
-          _isOnDuty = isOnDutySimpanan; 
+          _isOnDuty = currentDutyStatus; // 🚀 Gunakan data dari server
           _bookingHariIni = todayJobsCount + todayHistoryCount;
           _selesai = todayHistoryCount; 
           _nextBooking = nextBook;
@@ -254,7 +281,7 @@ class _HomeScreenState extends State<HomeScreen> {
         
         for (var item in dataList) {
           if (item is String) {
-            // 🔥 SABUK PENGAMAN 3A: Carousel Array of String
+            // 🛡️ SABUK PENGAMAN 3A: Carousel Array of String
             loadedImages.add(item.replaceFirst('http://', 'https://'));
           } else if (item is Map) {
             String? url = item['image'] ?? item['image_url'] ?? item['banner'] ?? item['file'] ?? item['url'] ?? item['foto'] ?? item['gambar'] ?? item['path'];
@@ -277,7 +304,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 url = url.replaceAll('assets/images/', '').replaceFirst(RegExp(r'^/'), '');
                 url = '${ApiService.baseImageUrl}/$url'; 
               }
-              // 🔥 SABUK PENGAMAN 3B: Carousel Array of Object
+              // 🛡️ SABUK PENGAMAN 3B: Carousel Array of Object
               url = url.replaceFirst('http://', 'https://'); // Paksa HTTPS
               loadedImages.add(url);
             }
@@ -661,7 +688,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 Row(
                   crossAxisAlignment: CrossAxisAlignment.center,
                   children: [
-                    // 🔥 PERBAIKAN: Jika dipencet, bawa mereka ke halaman Manajemen Absensi
+                    // 🛡️ PERBAIKAN: Jika dipencet, bawa mereka ke halaman Manajemen Absensi
                     GestureDetector(
                       onTap: () {
                         Navigator.pushNamed(context, '/leave_management').then((_) {

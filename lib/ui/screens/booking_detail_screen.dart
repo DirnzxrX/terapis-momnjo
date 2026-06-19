@@ -1,7 +1,8 @@
 import 'dart:io'; 
-import 'dart:convert'; // 🔥 DITAMBAHKAN UNTUK JSON ENCODER DEBUG
+import 'dart:convert'; 
+import 'dart:async'; // 🔥 TAMBAHAN UNTUK TIMER
 import 'package:flutter/material.dart';
-import 'package:flutter/foundation.dart'; // Untuk mendeteksi kIsWeb
+import 'package:flutter/foundation.dart'; 
 import 'package:url_launcher/url_launcher.dart'; 
 import 'package:therapist_momnjo/data/api_service.dart';
 import 'package:intl/intl.dart';
@@ -30,6 +31,15 @@ class _BookingDetailScreenState extends State<BookingDetailScreen> {
   String _photoTimestamp = '';
 
   bool _isPemeriksaanSkipped = false;
+  Map<String, dynamic>? _savedActiveJobState;
+
+  // --- STATE UNTUK TIMER ---
+  Timer? _treatmentTimer;
+  int _totalDurationMinutes = 0;
+  bool _hasShownTimeUp = false;
+  DateTime? _waktuMulaiServer;
+  Duration _serverTimeOffset = Duration.zero;
+  bool _isServicePaused = false;
 
   @override
   void didChangeDependencies() {
@@ -51,10 +61,12 @@ class _BookingDetailScreenState extends State<BookingDetailScreen> {
         if (idTrans != null && idTrans.isNotEmpty) {
           _loadJobDetail(idTrans);
         }
+
+        _calculateTotalDuration();
+        _checkTreatmentTimer(); // Cek timer saat layar pertama kali dibuka
+
         _isInitialized = true;
       } else {
-        // --- PERBAIKAN LOGIKA DEFENSIVE ---
-        // Jika args null (terjadi saat refresh di Flutter Web), kita paksa kembali ke halaman sebelumnya
         WidgetsBinding.instance.addPostFrameCallback((_) {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
@@ -65,11 +77,112 @@ class _BookingDetailScreenState extends State<BookingDetailScreen> {
           if (Navigator.canPop(context)) {
             Navigator.pop(context);
           } else {
-            Navigator.pushReplacementNamed(context, '/'); // Paksa ke root
+            Navigator.pushReplacementNamed(context, '/'); 
           }
         });
       }
     }
+  }
+
+  @override
+  void dispose() {
+    _treatmentTimer?.cancel(); // Bersihkan timer saat layar dihancurkan
+    super.dispose();
+  }
+
+  // 🔥 FUNGSI HITUNG TOTAL DURASI DARI ARRAY TREATMENTS
+  void _calculateTotalDuration() {
+    int total = 0;
+    final treatments = _data?['treatments'] ?? [];
+    for (var item in treatments) {
+      String rawDuration = '';
+      if (item is Map) {
+        rawDuration = (item['duration'] ?? item['durasi'] ?? item['waktu'] ?? '0').toString();
+      }
+      // Ambil angkanya saja
+      String numStr = rawDuration.replaceAll(RegExp(r'[^0-9]'), '');
+      if (numStr.isNotEmpty) {
+        total += int.parse(numStr);
+      }
+    }
+    setState(() {
+      _totalDurationMinutes = total;
+    });
+  }
+
+  // 🔥 FUNGSI PENGECEKAN DAN PEMICU TIMER
+  DateTime get _currentServerTime => DateTime.now().add(_serverTimeOffset);
+
+  DateTime? _parseServerDateTime(dynamic value) {
+    if (value == null) return null;
+    final raw = value.toString().trim();
+    if (raw.isEmpty || raw.toLowerCase() == 'null') return null;
+    return DateTime.tryParse(raw);
+  }
+
+  bool _parseBool(dynamic value) {
+    if (value == true || value == 1) return true;
+    final raw = value?.toString().trim().toLowerCase() ?? '';
+    return raw == 'true' || raw == '1' || raw == 'yes';
+  }
+
+  void _checkTreatmentTimer() {
+    _treatmentTimer?.cancel();
+
+    if (_currentStatus.toLowerCase() != 'started' || _totalDurationMinutes <= 0) return;
+    if (_isServicePaused) return;
+    if (_waktuMulaiServer == null) return;
+
+    final elapsedSeconds = _currentServerTime.difference(_waktuMulaiServer!).inSeconds;
+    final totalSeconds = _totalDurationMinutes * 60;
+    final remainingSeconds = totalSeconds - elapsedSeconds;
+
+    if (remainingSeconds <= 0) {
+      _showTimeUpPopup();
+      return;
+    }
+
+    _hasShownTimeUp = false;
+    _treatmentTimer = Timer(Duration(seconds: remainingSeconds), () {
+      if (mounted && _currentStatus.toLowerCase() == 'started') {
+        _showTimeUpPopup();
+      }
+    });
+  }
+
+  // 🔥 TAMPILAN POPUP WAKTU HABIS
+  void _showTimeUpPopup() {
+    if (_hasShownTimeUp) return;
+    setState(() => _hasShownTimeUp = true);
+
+    showDialog(
+      context: context,
+      barrierDismissible: false, // Wajib ditutup lewat tombol
+      builder: (context) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: const Row(
+          children: [
+            Icon(Icons.timer_off, color: Colors.red, size: 28),
+            SizedBox(width: 8),
+            Text('Waktu Habis!', style: TextStyle(fontWeight: FontWeight.bold, color: Colors.red)),
+          ],
+        ),
+        content: const Text(
+          'Estimasi waktu untuk treatment ini telah selesai.\n\nJika pekerjaan sudah selesai, buka Job Aktif lalu tekan "Selesai Treatment".',
+          style: TextStyle(fontSize: 14, height: 1.4),
+        ),
+        actions: [
+          ElevatedButton(
+            onPressed: () => Navigator.pop(context),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: primaryPink,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12))
+            ),
+            child: const Text('Mengerti', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+          )
+        ],
+      )
+    );
   }
 
   Future<void> _loadJobDetail(String idTransaksi) async {
@@ -79,6 +192,33 @@ class _BookingDetailScreenState extends State<BookingDetailScreen> {
     
     if (mounted && response['success'] == true) {
       setState(() {
+        final serverTime = _parseServerDateTime(response['server_time']);
+        if (serverTime != null) {
+          _serverTimeOffset = serverTime.difference(DateTime.now());
+        }
+
+        final bookingStatus = response['booking_status']?.toString();
+        if (bookingStatus != null && bookingStatus.isNotEmpty) {
+          _currentStatus = bookingStatus;
+          _data!['booking_status'] = bookingStatus;
+        }
+
+        final serviceState = response['service_state']?.toString();
+        final serviceStateText = serviceState?.toLowerCase() ?? '';
+        _isServicePaused = _parseBool(response['is_paused']) ||
+            serviceStateText == 'paused';
+        _data!['service_state'] = serviceState;
+        _data!['is_paused'] = _isServicePaused;
+
+        final parsedStart = _parseServerDateTime(response['waktu_mulai_iso']) ??
+            _parseServerDateTime(response['waktu_mulai']);
+        final elapsedSeconds = int.tryParse(response['elapsed_seconds']?.toString() ?? '') ?? 0;
+        if (elapsedSeconds > 0 || _isServicePaused) {
+          _waktuMulaiServer = _currentServerTime.subtract(Duration(seconds: elapsedSeconds));
+        } else {
+          _waktuMulaiServer = parsedStart;
+        }
+
         _data!['address'] = response['address'];
         _data!['coordinate_address'] = response['coordinate_address'];
         _data!['catatan_alamat'] = response['catatan_alamat'];
@@ -87,6 +227,9 @@ class _BookingDetailScreenState extends State<BookingDetailScreen> {
           _data!['treatments'] = response['data']; 
         }
       });
+      // Kalkulasi ulang jika data detail (termasuk durasi) baru tiba dari server
+      _calculateTotalDuration();
+      _checkTreatmentTimer();
     }
     
     if (mounted) {
@@ -161,16 +304,22 @@ class _BookingDetailScreenState extends State<BookingDetailScreen> {
     if (mounted) {
       setState(() { _isUpdatingStatus = false; });
       if (response['success'] == true || response['status'] == 'success') {
+        final responseStatus = response['data'] is Map
+            ? response['data']['status']?.toString()
+            : response['booking_status']?.toString();
         setState(() {
-          _currentStatus = newStatus;
-          _data?['booking_status'] = newStatus; 
+          _currentStatus = (responseStatus != null && responseStatus.isNotEmpty) ? responseStatus : newStatus;
+          _data?['booking_status'] = _currentStatus; 
         });
+
+        final idTransaksi = _data?['id_transaksi']?.toString() ?? '';
+        if (idTransaksi.isNotEmpty) {
+          await _loadJobDetail(idTransaksi);
+        }
       } else {
-        // 🔥 MODIFIKASI: Menangkap pesan debug dari Backend + Mencegah Status Berubah
         String errorMessage = response['message'] ?? 'Gagal update status server';
         
         if (response['debug'] != null) {
-          // Konversi object debug PHP menjadi string format JSON yang rapi
           String debugInfo = '';
           try {
             debugInfo = const JsonEncoder.withIndent('  ').convert(response['debug']);
@@ -178,10 +327,6 @@ class _BookingDetailScreenState extends State<BookingDetailScreen> {
             debugInfo = response['debug'].toString();
           }
           
-          debugPrint("=== DEBUG DARI BACKEND ===");
-          debugPrint(debugInfo);
-          debugPrint("==========================");
-
           showDialog(
             context: context,
             builder: (ctx) {
@@ -189,7 +334,7 @@ class _BookingDetailScreenState extends State<BookingDetailScreen> {
                 title: const Text('Gagal Upload (Info PHP)'),
                 content: SingleChildScrollView(
                   child: Column(
-                    mainAxisSize: MainAxisSize.min, // 🔥 PERBAIKAN: Diubah dari crossAxisSize menjadi mainAxisSize
+                    mainAxisSize: MainAxisSize.min, 
                     children: [
                       Text(
                         errorMessage, 
@@ -234,8 +379,57 @@ class _BookingDetailScreenState extends State<BookingDetailScreen> {
             ),
           );
         }
-        // PERHATIAN: Di blok ini JANGAN ada `setState(_currentStatus = newStatus)`. 
-        // Supaya garis timeline tidak berubah menjadi hijau kalau aslinya gagal.
+      }
+    }
+  }
+
+  Future<void> _openActiveJob() async {
+    final result = await Navigator.pushNamed(
+      context,
+      '/active_job',
+      arguments: {
+        ...?_data,
+        'savedState': _savedActiveJobState,
+        'pemeriksaan_skipped': _isPemeriksaanSkipped,
+        'booking_status': _currentStatus,
+      },
+    );
+
+    if (result == null || result is! Map) return;
+
+    final resultMap = Map<String, dynamic>.from(result);
+    final idTransaksi = _data?['id_transaksi']?.toString() ?? '';
+
+    if (resultMap['action'] == 'finish_treatment') {
+      setState(() {
+        _data?['durasi_aktual'] = resultMap['durasi_aktual'];
+        _savedActiveJobState = {
+          'secondsElapsed': resultMap['durasi_aktual'],
+          'hasStarted': true,
+          'isPaused': true,
+        };
+      });
+
+      if (idTransaksi.isNotEmpty) {
+        await _loadJobDetail(idTransaksi);
+      }
+
+      if (mounted) {
+        Navigator.pushReplacementNamed(context, '/visit_report', arguments: _data);
+      }
+    } else if (resultMap['action'] == 'save_state') {
+      final resultServiceState =
+          (resultMap['service_state']?.toString() ?? '').toLowerCase();
+      setState(() {
+        _currentStatus = 'Started';
+        _data?['booking_status'] = _currentStatus;
+        _isServicePaused = _parseBool(resultMap['isPaused']) ||
+            resultServiceState == 'paused';
+        _savedActiveJobState = resultMap;
+      });
+
+      if (idTransaksi.isNotEmpty) {
+        await _loadJobDetail(idTransaksi);
       }
     }
   }
@@ -268,7 +462,7 @@ class _BookingDetailScreenState extends State<BookingDetailScreen> {
       final XFile? photo = await picker.pickImage(
         source: ImageSource.camera,
         preferredCameraDevice: CameraDevice.front, 
-        imageQuality: 50, // 🔥 TAMBAHAN: Kompres gambar jadi 50% supaya tidak kena limit di server
+        imageQuality: 50, 
       );
 
       if (photo != null) {
@@ -317,7 +511,6 @@ class _BookingDetailScreenState extends State<BookingDetailScreen> {
                     child: Stack(
                       alignment: Alignment.bottomLeft,
                       children: [
-                        // MEMISAHKAN LOGIKA WEB DAN MOBILE (Supaya tidak error dart:io)
                         kIsWeb
                           ? Image.network(
                               _arrivalPhotoPath!,
@@ -772,53 +965,19 @@ class _BookingDetailScreenState extends State<BookingDetailScreen> {
     if (s == 'pemeriksaan') {
       return _buildSingleActionButton('MULAI SESI TREATMENT', () async {
         await _updateStatusAPI('Started');
+        
+        // 🔥 TRIGGER PENGHITUNGAN WAKTU KETIKA STATUS BERUBAH JADI 'STARTED'
+        _checkTreatmentTimer();
+
         if (mounted) {
-          final result = await Navigator.pushNamed(context, '/active_job', arguments: _data);
-          
-          if (result != null && result is Map && result['action'] == 'finish_treatment') {
-             setState(() {
-               _currentStatus = 'Closed';
-               _data?['booking_status'] = 'Closed';
-             });
-             Navigator.pushReplacementNamed(context, '/visit_report', arguments: _data);
-          }
+          await _openActiveJob();
         }
       });
     }
 
     if (s == 'started') {
-      return _buildSingleActionButton('SELESAIKAN KUNJUNGAN', () async {
-        setState(() { _isUpdatingStatus = true; }); 
-        
-        final api = ApiService();
-        final List<dynamic> treatments = _data?['treatments'] ?? [];
-        final String idTransaksi = _data?['id_transaksi']?.toString() ?? '';
-
-        for (var item in treatments) {
-          bool alreadyDone = item is Map && item['is_done'] == true;
-          if (!alreadyDone) {
-            String pName = '';
-            if (item is Map) {
-              pName = (item['product_name'] ?? item['name'] ?? '').toString().trim();
-            } else {
-              pName = item.toString().trim();
-            }
-
-            if (pName.isNotEmpty && idTransaksi.isNotEmpty) {
-              await api.updateJobStatus(
-                idTransaksi: idTransaksi,
-                action: 'finish',
-                productName: pName,
-              );
-            }
-          }
-        }
-
-        await _updateStatusAPI('Closed');
-        
-        setState(() { _isUpdatingStatus = false; });
-        
-        if (mounted) Navigator.pushReplacementNamed(context, '/visit_report', arguments: _data);
+      return _buildSingleActionButton('LANJUT TREATMENT', () async {
+        await _openActiveJob();
       });
     }
 
@@ -829,21 +988,26 @@ class _BookingDetailScreenState extends State<BookingDetailScreen> {
         final api = ApiService();
         final List<dynamic> treatments = _data?['treatments'] ?? [];
         final String idTransaksi = _data?['id_transaksi']?.toString() ?? '';
+        final String idBooking = _data?['id_booking']?.toString() ?? '';
 
         for (var item in treatments) {
           bool alreadyDone = item is Map && item['is_done'] == true;
           if (!alreadyDone) {
             String pName = '';
+            String? idDetail;
             if (item is Map) {
+              idDetail = item['id_detail']?.toString();
               pName = (item['product_name'] ?? item['name'] ?? '').toString().trim();
             } else {
               pName = item.toString().trim();
             }
 
-            if (pName.isNotEmpty && idTransaksi.isNotEmpty) {
+            if (idTransaksi.isNotEmpty && ((idDetail != null && idDetail.isNotEmpty) || pName.isNotEmpty)) {
               await api.updateJobStatus(
                 idTransaksi: idTransaksi,
+                idBooking: idBooking,
                 action: 'finish',
+                idDetail: idDetail,
                 productName: pName,
               );
             }

@@ -1,7 +1,7 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:therapist_momnjo/data/api_service.dart'; // Pastikan import ApiService ada
+import 'package:therapist_momnjo/data/api_service.dart'; 
 
 class LeaveManagementScreen extends StatefulWidget {
   const LeaveManagementScreen({Key? key}) : super(key: key);
@@ -22,7 +22,10 @@ class _LeaveManagementScreenState extends State<LeaveManagementScreen> {
   bool _isDragging = false;
   bool _isSubmitting = false; 
 
+  // --- STATE PROFIL ---
   String _therapistName = 'Memuat...';
+  String _therapistId = '-';
+  String _fotoProfil = '';
 
   DateTime? _filterStartDate;
   DateTime? _filterEndDate;
@@ -35,55 +38,145 @@ class _LeaveManagementScreenState extends State<LeaveManagementScreen> {
     _loadInitialData();
   }
 
-  // --- PERBAIKAN ARSITEKTUR: SUMBER KEBENARAN DARI API SERVER ---
+  // --- MENGAMBIL DATA DARI LOKAL & API SECARA PARALEL ---
   Future<void> _loadInitialData() async {
     final prefs = await SharedPreferences.getInstance();
     if (!mounted) return;
     
-    // 1. Load Nama Terapis dan Status Toggle dari Local 
-    String? savedName = prefs.getString('user_name') ?? prefs.getString('nama_lengkap');
-    bool currentDutyStatus = prefs.getBool('is_on_duty') ?? false;
+    // 1. Load Data Profil dari Local Cache (Instant UI)
+    String savedName = prefs.getString('nama_lengkap') ?? prefs.getString('fullname') ?? 'Terapis';
+    String savedId = prefs.getString('username') ?? prefs.getString('id_terapis') ?? '-';
+    String cachedFoto = prefs.getString('foto_profil') ?? prefs.getString('foto') ?? '';
 
-    // 2. Load Riwayat Absensi LANGSUNG DARI SERVER API
-    await _fetchHistoryFromServer();
-
+    // 🔥 Sabuk Pengaman Cache
+    if (cachedFoto.isNotEmpty && cachedFoto != "null" && cachedFoto != "-") {
+       if (!cachedFoto.startsWith('http')) {
+         cachedFoto = "${ApiService.baseImageUrl}/$cachedFoto";
+       }
+       cachedFoto = cachedFoto.replaceFirst('http://', 'https://'); 
+    }
+    
     if (mounted) {
       setState(() {
-        _therapistName = (savedName != null && savedName.isNotEmpty) ? savedName : 'Terapis (Belum diset)';
-        _isOnDuty = currentDutyStatus;
-        _dragValue = _isOnDuty ? 1.0 : 0.0;
-        _isDataLoaded = true;
+        _therapistName = savedName;
+        _therapistId = savedId;
+        _fotoProfil = cachedFoto;
       });
+    }
+
+    // 2. Load Riwayat Absensi
+    await _fetchHistoryFromServer();
+
+    // 3. Sinkronisasi Data Profil Terbaru dari Server
+    _syncProfileData();
+  }
+
+  Future<void> _syncProfileData() async {
+    try {
+      final api = ApiService();
+      final responses = await Future.wait([
+        api.getProfile(),
+        api.getDataDiri(),
+      ]);
+
+      if (!mounted) return;
+
+      final profileResponse = responses[0];
+      final dataDiriResponse = responses[1];
+      String rawFoto = "";
+      String fetchedName = _therapistName;
+      String fetchedId = _therapistId;
+
+      if (profileResponse['success'] == true || profileResponse['status'] == 'success') {
+        final data = profileResponse['data'];
+        fetchedName = data['nama_lengkap']?.toString() ?? fetchedName;
+        fetchedId = data['username'] ?? fetchedId;
+        rawFoto = data['avatar_url']?.toString() ?? data['avatar']?.toString() ?? "";
+      }
+
+      if (dataDiriResponse['success'] == true || dataDiriResponse['status'] == 'success') {
+        dynamic rawDataDiri = dataDiriResponse['data'];
+        Map<String, dynamic> safeDataDiri = {};
+        if (rawDataDiri is List && rawDataDiri.isNotEmpty) {
+          safeDataDiri = rawDataDiri[0];
+        } else if (rawDataDiri is Map) {
+          safeDataDiri = Map<String, dynamic>.from(rawDataDiri);
+        }
+        String fetchFotoDiri = safeDataDiri['foto_profil']?.toString() ?? safeDataDiri['foto']?.toString() ?? safeDataDiri['image']?.toString() ?? "";
+        if (fetchFotoDiri.isNotEmpty && fetchFotoDiri != "null") {
+          rawFoto = fetchFotoDiri;
+        }
+      }
+
+      // 🔥 Sabuk Pengaman API (Anti Mixed-Content)
+      String remoteFoto = "";
+      if (rawFoto.isNotEmpty && rawFoto != "null" && rawFoto != "-") {
+         if (!rawFoto.startsWith('http')) {
+           remoteFoto = "${ApiService.baseImageUrl}/$rawFoto"; 
+         } else {
+           remoteFoto = rawFoto;
+         }
+         remoteFoto = remoteFoto.replaceFirst('http://', 'https://'); 
+      }
+
+      setState(() {
+        _therapistName = fetchedName;
+        _therapistId = fetchedId;
+        if (remoteFoto.isNotEmpty) {
+          _fotoProfil = "$remoteFoto?v=${DateTime.now().millisecondsSinceEpoch}";
+        }
+      });
+
+      // Simpan ke cache
+      final prefs = await SharedPreferences.getInstance();
+      if (rawFoto.isNotEmpty) prefs.setString('foto_profil', rawFoto);
+    } catch (e) {
+      debugPrint("Gagal sinkron profil di absensi: $e");
     }
   }
 
-  // --- FUNGSI PARSING JSON YANG SUDAH DIPERBAIKI ---
+  // --- FUNGSI PARSING JSON & PENENTUAN STATUS CHECK-IN ---
   Future<void> _fetchHistoryFromServer() async {
     try {
       final apiResult = await ApiService().getAttendanceHistory();
       
       if (apiResult['success'] == true && apiResult['data'] != null) {
-        
-        // Membaca object 'history' di dalam object 'data'
         final dataMap = apiResult['data'] as Map<String, dynamic>;
         final List<dynamic> rawData = dataMap['history'] ?? [];
         
+        bool currentDutyStatus = false;
+
+        // LOGIKA PENENTUAN STATUS (Asumsi data index 0 adalah riwayat terbaru/hari ini)
+        if (rawData.isNotEmpty) {
+          final latestRecord = rawData.first as Map<String, dynamic>;
+          final checkInMap = latestRecord['check_in'] as Map<String, dynamic>?;
+          final checkOutMap = latestRecord['check_out'] as Map<String, dynamic>?;
+          
+          bool hasCheckIn = checkInMap != null && checkInMap['waktu'] != null;
+          bool hasCheckOut = checkOutMap != null && checkOutMap['waktu'] != null;
+          
+          // Jika user punya check_in tapi belum check_out, berarti kondisinya On Duty
+          if (hasCheckIn && !hasCheckOut) {
+            currentDutyStatus = true;
+          }
+        }
+        
         setState(() {
+          _isOnDuty = currentDutyStatus;
+          _dragValue = _isOnDuty ? 1.0 : 0.0;
+          _isDataLoaded = true;
+
           _attendanceHistory = rawData.map((item) {
             final mapItem = Map<String, dynamic>.from(item);
-            
-            // Ekstrak nested object
             final checkInMap = mapItem['check_in'] as Map<String, dynamic>?;
             final checkOutMap = mapItem['check_out'] as Map<String, dynamic>?;
 
-            // Helper untuk mengambil jam dari format "2026-06-17 09:58:06" menjadi "09:58 WIB"
             String formatTime(String? datetime) {
               if (datetime == null || datetime.isEmpty) return '--';
               try {
                 final timePart = datetime.split(' ').last; 
                 if (timePart.length >= 5) {
-                  final hm = timePart.substring(0, 5); 
-                  return '$hm WIB';
+                  return '${timePart.substring(0, 5)} WIB';
                 }
                 return timePart;
               } catch (_) {
@@ -91,7 +184,6 @@ class _LeaveManagementScreenState extends State<LeaveManagementScreen> {
               }
             }
 
-            // Helper untuk memoles tanggal
             String formatDateLabel(String? rawDate) {
               if (rawDate == null || rawDate.isEmpty) return '-';
               try {
@@ -116,10 +208,14 @@ class _LeaveManagementScreenState extends State<LeaveManagementScreen> {
           }).toList();
         });
       } else {
-        setState(() => _attendanceHistory = []);
+        setState(() {
+          _isDataLoaded = true;
+          _attendanceHistory = [];
+        });
       }
     } catch (e) {
       debugPrint("Gagal mengambil data riwayat dari server: $e");
+      setState(() => _isDataLoaded = true);
     }
   }
 
@@ -138,17 +234,10 @@ class _LeaveManagementScreenState extends State<LeaveManagementScreen> {
     final apiResult = await ApiService().submitAttendance(action: action);
 
     if (apiResult['success'] == true || apiResult['status'] == 'success') {
-      
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.setBool('is_on_duty', newDutyStatus);
-
-      // Paksa HP mengambil ulang data terbaru dari Server setelah sukses absen
       await _fetchHistoryFromServer();
 
       if (mounted) {
         setState(() {
-          _isOnDuty = newDutyStatus;
-          _dragValue = _isOnDuty ? 1.0 : 0.0;
           _isSubmitting = false;
         });
         
@@ -220,7 +309,6 @@ class _LeaveManagementScreenState extends State<LeaveManagementScreen> {
     return '${date.day.toString().padLeft(2, '0')} ${months[date.month - 1]} ${date.year}';
   }
 
-  // --- KEMBALIKAN FUNGSI INI AGAR FILTER TANGGAL BERFUNGSI ---
   DateTime? _parseDateStr(String dateStr) {
     const months = ['Jan', 'Feb', 'Mar', 'Apr', 'Mei', 'Jun', 'Jul', 'Agt', 'Sep', 'Okt', 'Nov', 'Des'];
     try {
@@ -264,6 +352,7 @@ class _LeaveManagementScreenState extends State<LeaveManagementScreen> {
         body: GestureDetector(
           onTap: () => FocusScope.of(context).unfocus(),
           child: SingleChildScrollView(
+            physics: const AlwaysScrollableScrollPhysics(),
             padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -300,14 +389,32 @@ class _LeaveManagementScreenState extends State<LeaveManagementScreen> {
         children: [
           Row(
             children: [
-              const CircleAvatar(radius: 28, backgroundImage: NetworkImage('https://i.pravatar.cc/150?img=43')),
+              CircleAvatar(
+                radius: 28, 
+                backgroundColor: Colors.grey.shade200,
+                onBackgroundImageError: (exception, stackTrace) {
+                   if (_fotoProfil.isNotEmpty && !_fotoProfil.contains('ui-avatars')) {
+                     WidgetsBinding.instance.addPostFrameCallback((_) {
+                       if (mounted) {
+                         setState(() {
+                           _fotoProfil = ""; // Panggil Fallback Avatar
+                         });
+                       }
+                     });
+                   }
+                },
+                backgroundImage: _fotoProfil.isNotEmpty && _fotoProfil.startsWith('https')
+                    ? NetworkImage(_fotoProfil)
+                    : NetworkImage('https://ui-avatars.com/api/?name=${Uri.encodeComponent(_therapistName)}&background=E5804D&color=fff') as ImageProvider,
+              ),
               const SizedBox(width: 16),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(_therapistName, style: TextStyle(fontSize: 18, fontWeight: FontWeight.w900, color: textDarkBrown)),
-                    Text('Terapis', style: TextStyle(color: Colors.grey.shade500, fontSize: 14, fontWeight: FontWeight.w500)),
+                    const SizedBox(height: 2),
+                    Text('Terapis ID: $_therapistId', style: TextStyle(color: Colors.grey.shade500, fontSize: 13, fontWeight: FontWeight.w600)),
                   ],
                 ),
               ),
@@ -352,7 +459,7 @@ class _LeaveManagementScreenState extends State<LeaveManagementScreen> {
                     width: double.infinity, height: 54,
                     decoration: BoxDecoration(
                       color: _isOnDuty ? primaryOrange : Colors.grey.shade400,
-                      borderRadius: BorderRadius.circular(30),
+                      borderRadius: BorderRadius.circular(24),
                     ),
                     child: Stack(
                       children: [
@@ -512,7 +619,7 @@ class _LeaveManagementScreenState extends State<LeaveManagementScreen> {
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
             decoration: const BoxDecoration(
               color: Color(0xFFF7F2ED), 
-              borderRadius: const BorderRadius.only(bottomLeft: Radius.circular(16), bottomRight: Radius.circular(16)),
+              borderRadius: BorderRadius.only(bottomLeft: Radius.circular(16), bottomRight: Radius.circular(16)),
             ),
             child: Row(
               children: [

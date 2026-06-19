@@ -202,7 +202,6 @@ class _EarningsScreenState extends State<EarningsScreen> {
                       itemCount: items.length,
                       itemBuilder: (context, index) {
                         final item = items[index];
-                        
                         // Proteksi .toString()
                         final String tglRaw = item['tanggal_redeem']?.toString() ?? '-';
                         final String trxId = item['id_transaksi']?.toString() ?? '-';
@@ -213,7 +212,7 @@ class _EarningsScreenState extends State<EarningsScreen> {
                         final String packageId = item['id_package_custom']?.toString() ?? '-';
                         
                         final String terapisPengerjaan = item['terapis_pengerjaan']?.toString() ?? '-';
-                        final String terapisPenjual = item['terapis']?.toString() ?? '-';
+                        final String terapisPenjual = item['id_terapis']?.toString() ?? '-';
                         
                         final double komisiDidapat = _parseDouble(item['komisi_5_persen']);
                         final String jenisOverride = item['jenis_override']?.toString() ?? '';
@@ -567,6 +566,7 @@ class _EarningsScreenState extends State<EarningsScreen> {
         
         // 🔥 MENANGKAP NAMA PENGERJA DARI API
         final String terapisPengerjaan = item['terapis_pengerjaan']?.toString() ?? '-';
+        final String terapisPenjual = item['id_terapis']?.toString() ?? '-';
         
         String badgeText = 'Normal';
         Color badgeColor = Colors.green.shade50;
