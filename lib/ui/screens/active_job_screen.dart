@@ -366,7 +366,7 @@ class _ActiveJobScreenState extends State<ActiveJobScreen> {
     });
   }
 
-  // === FUNGSI BARU: CEK WAKTU HABIS ===
+  // === FUNGSI CEK WAKTU HABIS ===
   void _checkTimeUp() {
     // Jika durasi berjalan sudah melampaui total estimasi dan popup belum muncul
     if (_secondsElapsed >= _estimatedTotalSeconds && 
@@ -378,13 +378,12 @@ class _ActiveJobScreenState extends State<ActiveJobScreen> {
     }
   }
 
-  // === FUNGSI BARU: PLAY ALARM & TAMPILKAN POPUP ===
+  // === FUNGSI PLAY ALARM & TAMPILKAN POPUP ===
   Future<void> _playAlarmAndShowPopup() async {
     try {
       // Set audio supaya looping (berulang) sampai dimatikan
       await _audioPlayer.setReleaseMode(ReleaseMode.loop);
-      // Mainkan audio. (Catatan: Pastikan ekstensi file kamu di folder benar. 
-      // Jika namanya hanya "alarm" tapi format mp3, tulis alarm.mp3. Jika wav tulis alarm.wav)
+      // Mainkan audio
       await _audioPlayer.play(AssetSource('audio/alarm.mp3')); 
     } catch (e) {
       debugPrint("Gagal memutar audio alarm: $e");
@@ -531,6 +530,19 @@ class _ActiveJobScreenState extends State<ActiveJobScreen> {
   Future<void> _handleTimerAction() async {
     if (!_hasStarted) {
       setState(() => _isApiLoading = true);
+
+      // 🔥 PERBAIKAN BUG: Jalankan pre-warm di background agar tidak memblokir API 🔥
+      Future.microtask(() async {
+        try {
+          await _audioPlayer.setVolume(0.0); // Mute sementara
+          await _audioPlayer.play(AssetSource('audio/alarm.mp3')); // Pancing play
+          await Future.delayed(const Duration(milliseconds: 200)); // Beri waktu baca (sedikit dilonggarkan)
+          await _audioPlayer.pause(); // Langsung pause
+          await _audioPlayer.setVolume(1.0); // Kembalikan volume ke normal
+        } catch (e) {
+          debugPrint("Gagal pre-warm audio: $e");
+        }
+      });
 
       final api = ApiService();
       final targetIdDetail = _activeIdDetail();

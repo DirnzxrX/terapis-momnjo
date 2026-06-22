@@ -447,12 +447,15 @@ class _ProfileScreenState extends State<ProfileScreen> {
           }),
           _buildMenuDivider(),
           
+          // 🔥 MENU SOP & PANDUAN SEMENTARA DI-HIDE 🔥
+          /*
           _buildMenuItem(Icons.menu_book_outlined, 'SOP & Panduan', () {
              Navigator.push(
               context,
               MaterialPageRoute(builder: (context) => const SopPanduanScreen()),);
           }),
           _buildMenuDivider(),
+          */
           
           _buildMenuItem(Icons.settings_outlined, 'Pengaturan', () {
             Navigator.push(
