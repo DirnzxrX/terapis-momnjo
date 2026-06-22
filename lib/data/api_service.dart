@@ -6,7 +6,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 class ApiService {
   static const String baseUrl =
-      "https://dashboard.momnjo.my.id/dev/api_terapis_v2";
+      "https://dashboard.momnjo.my.id/dev/api_terapis";
   static const String baseImageUrl =
       "https://dashboard.momnjo.my.id/assets/images";
 
