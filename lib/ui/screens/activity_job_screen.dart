@@ -324,16 +324,42 @@ class _ActivityScreenState extends State<ActivityScreen> {
     final bool isHomeService = serviceType.toLowerCase().contains('home') || serviceType.toLowerCase().contains('kunjungan');
     final String typeText = isHomeService ? 'Home Service' : 'Onsite';
 
-    // EKSTRAK TANGGAL & WAKTU (Mulai: --:-- menjadi waktu aktual)
+    // 🔥 PERBAIKAN: EKSTRAK TANGGAL & WAKTU AGAR BACA API 🔥
     String dateText = '-';
     String timeStr = '--:--';
+    
+    // 1. Ambil format tanggal dari API
     String rawDate = data['start_time']?.toString() ?? data['date']?.toString() ?? '';
+    
+    // 2. Cek apakah ada field khusus untuk waktu dari API (seringkali backend pisah field untuk jam)
+    String rawTime = data['time']?.toString() ?? data['booking_time']?.toString() ?? data['jam']?.toString() ?? data['jam_mulai']?.toString() ?? '';
+
+    // Proses parsing Tanggal & Jam bawaan dari start_time
     if (rawDate.isNotEmpty) {
       try {
         DateTime dt = DateTime.parse(rawDate);
         dateText = DateFormat('dd MMMM yyyy').format(dt);
-        timeStr = DateFormat('HH:mm').format(dt);
+        
+        // Cek jika start_time memiliki detail jam (biasanya mengandung spasi atau huruf 'T')
+        // contoh: "2026-12-01T14:30:00" atau "2026-12-01 14:30:00"
+        if (rawDate.contains('T') || rawDate.contains(' ')) {
+          String parsedTime = DateFormat('HH:mm').format(dt);
+          // Jika tidak jam 00:00 default, kita pakai waktu tersebut
+          if (parsedTime != '00:00') {
+            timeStr = parsedTime;
+          }
+        }
       } catch (_) {}
+    }
+
+    // Jika waktu masih kosong atau 00:00 dan di API ada field khusus untuk jam
+    if ((timeStr == '--:--' || timeStr == '00:00') && rawTime.isNotEmpty && rawTime.toLowerCase() != 'null') {
+      // Ambil 5 karakter pertama, misal format dari API "14:30:00" -> kita ambil "14:30"
+      if (rawTime.length >= 5) {
+        timeStr = rawTime.substring(0, 5);
+      } else {
+        timeStr = rawTime;
+      }
     }
 
     // Ekstrak Qty
@@ -430,7 +456,7 @@ class _ActivityScreenState extends State<ActivityScreen> {
               Icon(Icons.access_time, size: 14, color: Colors.grey.shade600),
               const SizedBox(width: 4),
               Text(
-                'Mulai: $timeStr',
+                'Waktu Booking: $timeStr',
                 style: TextStyle(fontSize: 12, color: Colors.grey.shade600, fontWeight: FontWeight.w500),
               ),
               const SizedBox(width: 16),
